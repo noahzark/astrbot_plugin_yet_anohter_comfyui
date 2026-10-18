@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from ..client import ComfyClient
+from ..exceptions import AuditError
 from ..settings import CoreSettings
 from .base import AuditResult, BaseAuditor, prepare_audit_image, rating_is_nsfw, resolve_audit_level
 
@@ -22,10 +23,7 @@ class RemoteTaggerAuditor(BaseAuditor):
         try:
             b64, _ = prepare_audit_image(image_bytes, self.settings.audit.downscale)
         except Exception as e:
-            logger.error("Audit image preprocessing failed: %s", e)
-            audit_info["is_nsfw"] = True
-            audit_info["message"] = "图片预处理失败"
-            return audit_info
+            raise AuditError(f"图片预处理失败: {e}")
 
         payload = {"image": b64, "model": "wd14-vit-v2-git", "threshold": 0.35}
         try:
@@ -33,13 +31,10 @@ class RemoteTaggerAuditor(BaseAuditor):
                 "POST", f"{self.settings.audit.site}/tagger/v1/interrogate",
                 json_data=payload, timeout=15)
         except Exception as e:
-            logger.error("Remote audit request failed: %s", e)
-            audit_info["message"] = f"远程审核请求失败: {e}"
-            return audit_info
+            raise AuditError(f"远程审核请求失败: {e}")
 
         if not isinstance(resp_dict, dict) or "caption" not in resp_dict:
-            audit_info["message"] = "远程审核返回异常格式"
-            return audit_info
+            raise AuditError("远程审核返回异常格式")
 
         tags = resp_dict["caption"]
         replace_list = ["general", "sensitive", "questionable", "explicit"]

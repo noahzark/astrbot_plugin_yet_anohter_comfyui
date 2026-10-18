@@ -4,7 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..comfyui_core.settings import CoreSettings, _default_shape_preset
+from ..comfyui_core.settings import (
+    AuditSettings,
+    CoreSettings,
+    TextAuditSettings,
+    _default_group_config,
+    _default_shape_preset,
+    _default_wd_model,
+)
 
 
 def _section(cfg: Mapping[str, Any], name: str) -> Mapping[str, Any]:
@@ -38,6 +45,71 @@ def _clean_default_value(defaults: Mapping[str, Any]) -> dict[str, Any]:
         if key in out and out[key] in ("", None):
             out[key] = None if key in ("shape", "accept_ratio") else ""
     return out
+
+
+def parse_group_overrides(entries: Any) -> dict[str, dict]:
+    """The ``groups.overrides`` template list -> the engine's ``group_config``.
+
+    Numbers below 0 mean "follow the global setting" and are left out.
+    """
+    out = _default_group_config()
+    for entry in entries or []:
+        if not isinstance(entry, Mapping):
+            continue
+        gid = str(entry.get("group_id") or "").strip()
+        if not gid:
+            continue
+        if not entry.get("enabled", True):
+            out["enable_in_group"][gid] = 0
+        if entry.get("pure"):
+            out["pure"][gid] = True
+        for src, dst in (("audit_level", "audit_level_group"), ("reject_nsfw_prompts", "reject_nsfw_prompts"),
+                         ("img_send", "img_send")):
+            try:
+                value = int(entry.get(src, -1))
+            except (TypeError, ValueError):
+                continue
+            if value >= 0:
+                out[dst][gid] = value
+    return out
+
+
+def build_audit(audit: Mapping[str, Any]) -> AuditSettings:
+    base = AuditSettings()
+    wd_model = _default_wd_model()
+    if audit.get("wd_repo_id"):
+        wd_model["repo_id"] = str(audit["wd_repo_id"])
+    return AuditSettings(
+        enabled=bool(audit.get("enabled", base.enabled)),
+        mode=str(audit.get("mode") or base.mode),
+        level=int(audit.get("level", base.level)),
+        site=str(audit.get("site") or base.site).rstrip("/"),
+        downscale=bool(audit.get("downscale", base.downscale)),
+        gpu=bool(audit.get("gpu", base.gpu)),
+        wd_model=wd_model,
+        nude_model_path=str(audit.get("nude_model_path") or ""),
+        fail_closed=bool(audit.get("fail_closed", base.fail_closed)),
+    )
+
+
+def build_text_audit(text: Mapping[str, Any]) -> TextAuditSettings:
+    settings = TextAuditSettings(
+        enabled=bool(text.get("enabled", False)),
+        ban_words=[str(w) for w in (text.get("ban_words") or []) if str(w).strip()],
+        use_endpoint=bool(text.get("use_endpoint", False)),
+    )
+    if text.get("endpoint"):
+        settings.openai["endpoint"] = str(text["endpoint"]).rstrip("/")
+    if text.get("token"):
+        settings.openai["token"] = str(text["token"])
+    if text.get("model"):
+        settings.openai["params"] = {**settings.openai.get("params", {}), "model": str(text["model"])}
+    return settings
+
+
+def text_audit_provider(cfg: Mapping[str, Any]) -> str:
+    """The AstrBot provider id picked for text audit ("" = the session's own)."""
+    return str(_section(cfg, "text_audit").get("provider") or "")
 
 
 def build_settings(cfg: Mapping[str, Any], data_dir: Path) -> CoreSettings:
@@ -76,4 +148,9 @@ def build_settings(cfg: Mapping[str, Any], data_dir: Path) -> CoreSettings:
         save_image=bool(delivery.get("save_image", True)),
         silent=bool(delivery.get("silent", False)),
         quiet=bool(delivery.get("quiet", False)),
+        img_send=int(delivery.get("img_send", base.img_send)),
+        r18_action=int(delivery.get("r18_action", base.r18_action)),
+        audit=build_audit(_section(cfg, "audit")),
+        text_audit=build_text_audit(_section(cfg, "text_audit")),
+        group_config=parse_group_overrides(_section(cfg, "groups").get("overrides")),
     )

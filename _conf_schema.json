@@ -157,6 +157,150 @@
         "type": "bool",
         "default": false,
         "hint": "与静默模式相同，但用户无法用参数打开提示。"
+      },
+      "img_send": {
+        "description": "图片发送方式",
+        "type": "int",
+        "default": 1,
+        "hint": "1 直接发图片；2 发图片链接的二维码；3 发图片链接。2 和 3 只在 QQ（aiocqhttp）上可用，其他平台按 1 处理。"
+      },
+      "r18_action": {
+        "description": "违规图片处理方式",
+        "type": "int",
+        "default": 1,
+        "hint": "审核判定违规的图片：1 私聊发给用户；2 群里发二维码；3 群里发链接；其他值直接拦截。2 和 3 只在 QQ 上可用，其他平台拦截。"
+      }
+    }
+  },
+  "audit": {
+    "description": "图片审核",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用图片审核",
+        "type": "bool",
+        "default": true
+      },
+      "level": {
+        "description": "审核等级",
+        "type": "int",
+        "default": 2,
+        "hint": "0 关闭；1 只拦截 explicit；2 再拦截 questionable；3 再拦截 sensitive；100 及以上全部拦截。"
+      },
+      "mode": {
+        "description": "审核方式",
+        "type": "string",
+        "default": "remote",
+        "options": ["remote", "wd14", "nudenet", "dual"],
+        "labels": ["远程 tagger API", "本地 WD14", "本地 NudeNet", "WD14 + NudeNet"],
+        "hint": "本地方式需要管理员自行安装依赖：WD14 需要 onnxruntime、pandas、huggingface_hub；NudeNet 需要 nudenet。"
+      },
+      "site": {
+        "description": "远程审核地址",
+        "type": "string",
+        "default": "http://server.20020026.xyz:7865",
+        "hint": "sd-webui tagger API 地址，remote 模式使用。"
+      },
+      "fail_closed": {
+        "description": "审核失败时按违规处理",
+        "type": "bool",
+        "default": true,
+        "hint": "审核服务不可用或出错时，开启则按违规处理，关闭则按安全处理。"
+      },
+      "downscale": {
+        "description": "审核前缩小图片",
+        "type": "bool",
+        "default": false,
+        "hint": "缩小到约 640×640 像素再审核，更快。"
+      },
+      "gpu": {
+        "description": "WD14 使用 GPU",
+        "type": "bool",
+        "default": false
+      },
+      "wd_repo_id": {
+        "description": "WD14 模型仓库",
+        "type": "string",
+        "default": "wd-vit-tagger-v3"
+      },
+      "nude_model_path": {
+        "description": "NudeNet 模型路径",
+        "type": "string",
+        "default": "",
+        "hint": "留空使用 NudeNet 自带模型。"
+      }
+    }
+  },
+  "text_audit": {
+    "description": "提示词审核",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用提示词审核",
+        "type": "bool",
+        "default": false,
+        "hint": "用大模型检查提示词，违规则拦截。群设置里可以单独开启拦截或改写。"
+      },
+      "ban_words": {
+        "description": "额外违禁词",
+        "type": "list",
+        "default": [],
+        "hint": "写进审核提示里的额外话题。"
+      },
+      "provider": {
+        "description": "审核使用的模型",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider",
+        "hint": "留空则使用当前会话正在使用的模型。"
+      },
+      "use_endpoint": {
+        "description": "改用自定义接口",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后不使用 AstrBot 的模型，而是调用下面的 OpenAI 兼容接口。"
+      },
+      "endpoint": {
+        "description": "自定义接口地址",
+        "type": "string",
+        "default": "https://api.openai.com/v1"
+      },
+      "token": {
+        "description": "自定义接口密钥",
+        "type": "string",
+        "default": ""
+      },
+      "model": {
+        "description": "自定义接口模型",
+        "type": "string",
+        "default": "gpt-4o-mini"
+      }
+    }
+  },
+  "groups": {
+    "description": "群设置",
+    "type": "object",
+    "items": {
+      "overrides": {
+        "description": "按群覆盖",
+        "type": "template_list",
+        "default": [],
+        "hint": "为单个群单独设置。数值填 -1 表示跟随全局设置。",
+        "templates": {
+          "group": {
+            "name": "群",
+            "hint": "一个群的设置",
+            "display_item": "group_id",
+            "items": {
+              "group_id": {"description": "群号", "type": "string", "default": ""},
+              "enabled": {"description": "在本群启用生图", "type": "bool", "default": true},
+              "audit_level": {"description": "图片审核等级", "type": "int", "default": -1, "hint": "-1 跟随全局；0 关闭；1-3 同全局说明。"},
+              "reject_nsfw_prompts": {"description": "提示词审核", "type": "int", "default": -1, "hint": "-1 跟随全局；0 关闭；1 拦截违规提示词；2 让模型改写提示词。"},
+              "img_send": {"description": "图片发送方式", "type": "int", "default": -1, "hint": "-1 跟随全局；1 图片；2 二维码；3 链接。"},
+              "pure": {"description": "纯净模式", "type": "bool", "default": false, "hint": "只发结果，不发耗时、任务 ID 等信息。"}
+            }
+          }
+        }
       }
     }
   }

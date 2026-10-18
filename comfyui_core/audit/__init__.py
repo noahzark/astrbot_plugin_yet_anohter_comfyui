@@ -10,6 +10,7 @@ import asyncio
 import logging
 
 from ..client import ComfyClient
+from ..exceptions import AuditError
 from ..settings import CoreSettings
 from .base import AuditResult, BaseAuditor, prepare_audit_image, rating_is_nsfw, resolve_audit_level
 from .local_nudenet import LocalNudeNetAuditor
@@ -30,28 +31,50 @@ class ImageAuditor:
         self.nudenet = LocalNudeNetAuditor(settings)
 
     async def audit(self, image_bytes: bytes, group_id: str = "") -> AuditResult:
-        cfg = self.settings.audit
-        if not cfg.enabled:
-            return {"is_nsfw": False, "message": "审核已关闭", "tags": {}}
+        """Rate one image for ``group_id``.
 
-        if cfg.mode == "dual":
+        Level 0 (globally or for the group) skips the audit; 100 or more
+        flags everything. When a backend cannot give a verdict the image
+        counts as NSFW if ``audit.fail_closed`` is on, safe otherwise.
+        """
+        cfg = self.settings.audit
+        level = resolve_audit_level(cfg.level, self.settings.group_config, group_id)
+        if not cfg.enabled or level <= 0:
+            return {"is_nsfw": False, "message": "", "tags": {}}
+
+        try:
+            result = await self._run(image_bytes, group_id)
+        except AuditError as e:
+            logger.warning("Image audit failed (%s), treating as %s", e, "NSFW" if cfg.fail_closed else "safe")
+            verdict = "按违规处理" if cfg.fail_closed else "按安全处理"
+            return {"is_nsfw": cfg.fail_closed, "message": f"审核失败，{verdict}: {e}", "tags": {}}
+        if level >= 100:
+            result["is_nsfw"] = True
+        return result
+
+    async def _run(self, image_bytes: bytes, group_id: str) -> AuditResult:
+        mode = self.settings.audit.mode
+        if mode == "dual":
             res_wd, res_nude = await asyncio.gather(
                 self.wd.audit(image_bytes, group_id),
                 self.nudenet.audit(image_bytes, group_id),
+                return_exceptions=True,
             )
+            for res in (res_wd, res_nude):
+                if isinstance(res, BaseException):
+                    raise res if isinstance(res, AuditError) else AuditError(str(res))
             return {
                 "is_nsfw": res_wd["is_nsfw"] or res_nude["is_nsfw"],
                 "message": f"{res_wd['message']}\n{res_nude['message']}",
                 "tags": {"wd": res_wd.get("tags"), "nude": res_nude.get("tags")},
             }
-        if cfg.mode == "wd14":
+        if mode == "wd14":
             return await self.wd.audit(image_bytes, group_id)
-        if cfg.mode == "nudenet":
+        if mode == "nudenet":
             return await self.nudenet.audit(image_bytes, group_id)
-        if cfg.mode != "remote":
-            logger.warning("Unknown audit mode %r, using remote", cfg.mode)
+        if mode != "remote":
+            logger.warning("Unknown audit mode %r, using remote", mode)
         return await self.remote.audit(image_bytes, group_id)
-
 
 __all__ = [
     "AuditResult",
