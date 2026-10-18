@@ -11,3 +11,5 @@ dist/
 config/
 data/
 
+
+.pytest_cache/
