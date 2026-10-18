@@ -23,7 +23,10 @@ _⭐ 本插件适配多后端，可以同时使用多个后端生图 ⭐_
 > （`main.py` / `metadata.yaml` / `_conf_schema.json`），把本仓库放进 AstrBot 的 `data/plugins/` 目录即可加载，
 > 工作流文件格式（`<名称>.json` + `<名称>_reflex.json`）与 NoneBot 版本完全一致，首次启动会把 `build_in_wf/`
 > 里的内置工作流复制到 `data/plugin_data/astrbot_plugin_yet_anohter_comfyui/workflows/`。
-> 当前已支持：`/prompt`、`/绘画`（以及各工作流 reflex 里的 `command`）文生图、多后端、冷却与每日上限。
+> 当前已支持：`/prompt`、`/绘画` 以及各工作流 reflex 里的 `command`（如 `/超分`、`/图生图`、`/打标`）；
+> 输入图片可以直接附带、引用含图片的消息，或在 QQ 上 @ 某人使用其头像；图片、视频、音频与文本输出；
+> reflex 的 `reg_args`、`override` 默认参数、`available` 后端限制；多后端与 `-con` 并发；冷却与每日上限。
+> 管理员可用 `/comfy reload` 在不重启的情况下重新扫描工作流目录。
 > 图片审核、队列管理、LLM 工具等功能正在迁移中；`nonebot_plugin_comfyui/` 目录在迁移完成前继续保留。
 
 ## 📑 目录

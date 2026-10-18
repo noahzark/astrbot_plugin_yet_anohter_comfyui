@@ -189,8 +189,10 @@ def apply_reflex(
         },
         "seed": {"seed": seed, "noise_seed": seed},
         "image_size": {"width": width, "height": height, "batch_size": batch_size},
-        "prompt": {"text": prompt, "Text": prompt, "prompt": prompt},
-        "negative_prompt": {"text": negative_prompt, "Text": negative_prompt, "prompt": negative_prompt},
+        # ``value`` is where string primitives (PrimitiveStringMultiline) keep their text.
+        "prompt": {"text": prompt, "Text": prompt, "prompt": prompt, "value": prompt},
+        "negative_prompt": {"text": negative_prompt, "Text": negative_prompt, "prompt": negative_prompt,
+                            "value": negative_prompt},
         "checkpoint": {
             "ckpt_name": model if model else None,
             "unet_name": model if model else None,
@@ -217,6 +219,8 @@ def apply_reflex(
                     inputs = node_data.get("inputs", {})
                     for k, v in update_mapping[item].items():
                         if k in inputs and v is not None:
+                            if k == "value" and not isinstance(inputs[k], str):
+                                continue  # a linked or numeric primitive, not a text box
                             inputs[k] = v
 
             # Per-node override actions.

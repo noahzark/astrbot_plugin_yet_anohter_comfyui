@@ -23,6 +23,7 @@ from .exceptions import (
     GetResultError,
     InterruptError,
     NoAvailableBackendError,
+    NoAvailableBackendForSelectedWorkflow,
     TaskError,
 )
 
@@ -107,15 +108,17 @@ class ComfyClient:
             raise ComfyuiBackendConnectionError(f"后端 {url} 端口无法连接")
         return await self.request("GET", f"{url}/prompt", timeout=self.timeout)
 
-    async def get_available_backends(self) -> tuple[set[int], dict[str, Any]]:
+    async def get_available_backends(self, allowed: set[int] | None = None) -> tuple[set[int], dict[str, Any]]:
+        """Probe the backends (only the ``allowed`` indices, if given)."""
         backend_dict: dict[str, Any] = {}
         available_indices: set[int] = set()
 
+        candidates = [(i, u) for i, u in enumerate(self.backend_urls) if allowed is None or i in allowed]
         results = await asyncio.gather(
-            *(self.get_backend_work_status(url) for url in self.backend_urls),
+            *(self.get_backend_work_status(url) for _, url in candidates),
             return_exceptions=True,
         )
-        for idx, (res, url) in enumerate(zip(results, self.backend_urls)):
+        for (idx, url), res in zip(candidates, results):
             if isinstance(res, Exception):
                 logger.warning("Backend [%s] %s is offline: %s", idx, url, res)
             else:
@@ -123,24 +126,39 @@ class ComfyClient:
                 available_indices.add(idx)
         return available_indices, backend_dict
 
-    async def select_backend(self, selected_backend: str | None = None) -> tuple[str, int, dict[str, Any]]:
+    async def select_backend(
+        self,
+        selected_backend: str | None = None,
+        allowed: set[int] | None = None,
+        workflow: str = "",
+    ) -> tuple[str, int, dict[str, Any]]:
         """Pick the backend with the shortest queue, or the one asked for.
 
+        ``allowed`` is a workflow's ``available`` list: a selected index
+        outside it falls back to automatic selection among the allowed ones.
         Returns ``(url, index, status)``; index is -1 for a URL that is not
         in the configured list.
         """
         if selected_backend:
             if selected_backend.isdigit():
                 idx = int(selected_backend)
-                if 0 <= idx < len(self.backend_urls):
+                if 0 <= idx < len(self.backend_urls) and (allowed is None or idx in allowed):
                     return self.backend_urls[idx], idx, {}
+                if allowed is not None:
+                    logger.info("Backend %s cannot run workflow %s, choosing among %s", idx, workflow, sorted(allowed))
             elif selected_backend in self.backend_urls:
-                return selected_backend, self.backend_urls.index(selected_backend), {}
+                idx = self.backend_urls.index(selected_backend)
+                if allowed is None or idx in allowed:
+                    return selected_backend, idx, {}
             else:
                 return selected_backend, -1, {}
 
-        available_indices, backend_dict = await self.get_available_backends()
+        available_indices, backend_dict = await self.get_available_backends(allowed)
         if not available_indices:
+            if allowed is not None:
+                raise NoAvailableBackendForSelectedWorkflow(
+                    f"工作流 {workflow} 只能在后端 {sorted(allowed)} 上运行，但这些后端当前都不可用"
+                )
             raise NoAvailableBackendError("没有可用的 ComfyUI 后端")
 
         best_url = None
@@ -174,8 +192,22 @@ class ComfyClient:
         form.add_field("image", image_bytes, filename=f"{name}.png", content_type="image/png")
         form.add_field("type", image_type)
         form.add_field("overwrite", str(overwrite).lower())
-        async with session.post(f"{backend_url}/upload/image", data=form) as resp:
-            return json.loads(await resp.read())
+        try:
+            async with session.post(f"{backend_url}/upload/image", data=form) as resp:
+                body = await resp.read()
+                status = resp.status
+        except Exception as e:
+            raise ComfyuiBackendConnectionError(f"上传图片到后端失败 [{backend_url}]: {e}")
+        try:
+            if status >= 400:
+                raise ValueError(f"HTTP {status}")
+            res = json.loads(body)
+            if not isinstance(res, dict) or "name" not in res:
+                raise ValueError("unexpected response")
+        except ValueError as e:
+            snippet = body[:200].decode("utf-8", "replace").strip()
+            raise ComfyuiBackendConnectionError(f"上传图片到后端失败 [{backend_url}]: {e} {snippet}".rstrip())
+        return res
 
     def _ws_kwargs(self) -> dict[str, Any]:
         ws_timeout = getattr(aiohttp, "ClientWSTimeout", None)

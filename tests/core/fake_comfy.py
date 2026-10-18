@@ -28,6 +28,7 @@ class FakeComfy:
         self.prompts: dict[str, dict] = {}
         self.views: list[str] = []
         self.uploads: list[str] = []
+        self.upload_status = 200  # anything else answers uploads with a proxy-style error page
         self.interrupted = 0
         self.deleted: list[str] = []
         self.cleared = 0
@@ -78,8 +79,28 @@ class FakeComfy:
         for node in body.values():
             if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
                 n_images = int(node["inputs"].get("batch_size", 1))
-        images = [{"filename": f"{pid[:8]}_{i}.png", "subfolder": "", "type": "output"} for i in range(n_images)]
-        return {"outputs": {"9": {"images": images}}, "status": {"status_str": "success", "completed": True}}
+
+        def files(nid: str, ext: str, n: int = 1) -> list[dict]:
+            return [{"filename": f"{pid[:8]}_{nid}_{i}.{ext}", "subfolder": "", "type": "output"} for i in range(n)]
+
+        # Answer for every output node the way the real node type does.
+        outputs: dict[str, dict] = {}
+        for nid, node in body.items():
+            kind = node.get("class_type", "") if isinstance(node, dict) else ""
+            if kind in ("SaveImage", "PreviewImage"):
+                outputs[nid] = {"images": files(nid, "png", n_images)}
+            elif kind == "SaveAudio":
+                outputs[nid] = {"audio": files(nid, "flac")}
+            elif kind == "VHS_VideoCombine":
+                outputs[nid] = {"gifs": files(nid, "mp4")}
+            elif kind == "SaveVideo":
+                outputs[nid] = {"images": files(nid, "mp4"), "animated": [True]}
+            elif kind.startswith("ShowText"):
+                outputs[nid] = {"text": [f"tags from {nid}"]}
+        outputs.setdefault("9", {"images": files("9", "png", n_images)})
+        for meta in outputs["9"]["images"]:
+            meta["filename"] = meta["filename"].replace("_9_", "_")
+        return {"outputs": outputs, "status": {"status_str": "success", "completed": True}}
 
     async def history(self, request: web.Request) -> web.Response:
         pid = request.match_info["pid"]
@@ -103,6 +124,8 @@ class FakeComfy:
                 await part.read()
             else:
                 await part.text()
+        if self.upload_status != 200:
+            return web.Response(status=self.upload_status, text="upstream connect error")
         self.uploads.append(name)
         return web.json_response({"name": name, "subfolder": "", "type": "input"})
 
