@@ -1,0 +1,163 @@
+{
+  "backend": {
+    "description": "ComfyUI 后端",
+    "type": "object",
+    "items": {
+      "urls": {
+        "description": "后端地址列表",
+        "type": "list",
+        "default": ["http://127.0.0.1:8188"],
+        "hint": "每行一个，如 http://127.0.0.1:8188。配置多个后端时会自动选择队列最短的一个，-con 参数可并发使用多个后端。"
+      },
+      "timeout": {
+        "description": "后端探测超时（秒）",
+        "type": "int",
+        "default": 5
+      },
+      "task_timeout": {
+        "description": "单个任务最长等待时间（秒）",
+        "type": "int",
+        "default": 1800
+      },
+      "http_proxy": {
+        "description": "HTTP 代理",
+        "type": "string",
+        "default": "",
+        "hint": "留空不使用代理。"
+      },
+      "model": {
+        "description": "默认模型（checkpoint 文件名）",
+        "type": "string",
+        "default": "",
+        "hint": "留空则使用工作流文件里的模型。"
+      }
+    }
+  },
+  "workflow": {
+    "description": "工作流",
+    "type": "object",
+    "items": {
+      "workflows_dir": {
+        "description": "工作流目录",
+        "type": "string",
+        "default": "",
+        "hint": "存放 <名称>.json 与 <名称>_reflex.json 的目录。留空则使用插件数据目录 data/plugin_data/astrbot_plugin_yet_anohter_comfyui/workflows，首次启动会把内置工作流复制进去。"
+      },
+      "default_workflow": {
+        "description": "默认工作流",
+        "type": "string",
+        "default": "txt2img"
+      },
+      "trigger_words": {
+        "description": "额外触发词",
+        "type": "list",
+        "default": ["comfyui执行"],
+        "hint": "除 prompt 之外，还能触发默认工作流的命令词。每个工作流 reflex 文件里的 command 也会自动注册为命令。"
+      },
+      "auto_lora": {
+        "description": "自动匹配 LoRA",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后，提示词里 <lora:名称:权重> 的名称会和后端已有的 LoRA 文件名模糊匹配。"
+      }
+    }
+  },
+  "generation": {
+    "description": "生成参数",
+    "type": "object",
+    "items": {
+      "base_res": {
+        "description": "基准分辨率",
+        "type": "int",
+        "default": 1024,
+        "hint": "使用 -ar 宽:高 时，总像素量等于该值的平方。"
+      },
+      "shape_preset": {
+        "description": "分辨率预设",
+        "type": "list",
+        "default": ["p=832x1216", "l=1216x832", "s=1024x1024", "lp=1152x1536", "ll=1536x1152", "ls=1240x1240", "up=960x1920", "ul=1920x960"],
+        "hint": "格式 名称=宽x高，通过 -r 名称 使用。"
+      },
+      "defaults": {
+        "description": "默认值",
+        "type": "object",
+        "items": {
+          "width": {"description": "宽度", "type": "int", "default": 832},
+          "height": {"description": "高度", "type": "int", "default": 1216},
+          "shape": {"description": "默认分辨率预设", "type": "string", "default": "", "hint": "留空按宽高。"},
+          "accept_ratio": {"description": "默认画幅比例", "type": "string", "default": "", "hint": "如 16:9，留空按宽高。"},
+          "steps": {"description": "步数", "type": "int", "default": 28},
+          "cfg_scale": {"description": "CFG scale", "type": "float", "default": 7.0},
+          "denoise_strength": {"description": "去噪强度", "type": "float", "default": 1.0},
+          "sampler": {"description": "采样器", "type": "string", "default": "dpmpp_2m"},
+          "scheduler": {"description": "调度器", "type": "string", "default": "karras"},
+          "batch_size": {"description": "每批数量", "type": "int", "default": 1},
+          "batch_count": {"description": "批数", "type": "int", "default": 1},
+          "preset_prompt": {"description": "预设正面提示词", "type": "text", "default": "", "hint": "会拼在用户提示词前面，-o 可跳过。"},
+          "preset_negative_prompt": {"description": "预设负面提示词", "type": "text", "default": "", "hint": "-on 可跳过。"},
+          "override": {"description": "默认不使用预设正面提示词", "type": "bool", "default": false},
+          "override_ng": {"description": "默认不使用预设负面提示词", "type": "bool", "default": false}
+        }
+      },
+      "max_values": {
+        "description": "普通用户上限",
+        "type": "object",
+        "hint": "管理员与超级用户不受限制。",
+        "items": {
+          "batch_size": {"description": "每批数量上限", "type": "int", "default": 2},
+          "batch_count": {"description": "批数上限", "type": "int", "default": 2},
+          "width": {"description": "宽度上限", "type": "int", "default": 2048},
+          "height": {"description": "高度上限", "type": "int", "default": 2048},
+          "steps": {"description": "步数上限", "type": "int", "default": 100}
+        }
+      }
+    }
+  },
+  "limits": {
+    "description": "频率限制",
+    "type": "object",
+    "items": {
+      "cd": {
+        "description": "冷却时间（秒）",
+        "type": "int",
+        "default": 20,
+        "hint": "0 为不限制。"
+      },
+      "day_limit": {
+        "description": "每人每日张数上限",
+        "type": "int",
+        "default": 50
+      },
+      "superusers": {
+        "description": "超级用户",
+        "type": "list",
+        "default": [],
+        "hint": "不受冷却、每日上限和参数上限约束的用户 ID。AstrBot 管理员自动视为超级用户。"
+      }
+    }
+  },
+  "delivery": {
+    "description": "消息与保存",
+    "type": "object",
+    "items": {
+      "save_image": {
+        "description": "保存生成的图片",
+        "type": "bool",
+        "default": true,
+        "hint": "保存到插件数据目录 output/image/日期/用户ID/。"
+      },
+      "silent": {
+        "description": "静默模式",
+        "type": "bool",
+        "default": false,
+        "hint": "不发送“正在生成中”等提示。"
+      },
+      "quiet": {
+        "description": "安静模式",
+        "type": "bool",
+        "default": false,
+        "hint": "与静默模式相同，但用户无法用参数打开提示。"
+      }
+    }
+  }
+}

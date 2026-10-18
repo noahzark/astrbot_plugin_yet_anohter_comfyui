@@ -67,7 +67,7 @@ def test_parser_negative_prompt_fix():
 
 def test_builtin_workflows():
     print("Testing built-in workflows...")
-    wf_dir = root_dir / "nonebot_plugin_comfyui" / "build_in_wf"
+    wf_dir = root_dir / "build_in_wf"
     assert wf_dir.exists(), "build_in_wf directory must exist"
 
     files = list(wf_dir.glob("*.json"))
