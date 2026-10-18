@@ -108,16 +108,27 @@ def build_request(
     group_id: str = "",
     is_admin: bool = False,
     is_superuser: bool = False,
+    workflow_defaults: dict[str, Any] | None = None,
 ) -> GenerationRequest:
-    """Port of the nonebot ``GenerationContext.__init__`` + limitations."""
-    defaults = settings.default_value
+    """Port of the nonebot ``GenerationContext.__init__`` + limitations.
+
+    ``workflow_defaults`` is the reflex file's ``override`` block: it takes
+    the place of the configured defaults for that workflow, and flags given
+    on the command line still win over it.
+    """
+    wf_defaults = dict(workflow_defaults or {})
+    defaults = {**settings.default_value, **wf_defaults}
+    if wf_defaults.keys() & {"width", "height", "shape", "accept_ratio"}:
+        # The workflow sizes itself; a configured default shape must not win over it.
+        defaults["shape"] = wf_defaults.get("shape")
+        defaults["accept_ratio"] = wf_defaults.get("accept_ratio")
     workflow = _first(args, "work_flows") or settings.default_workflow
 
     override = bool(_first(args, "override", False) or defaults.get("override", False))
     override_ng = bool(_first(args, "override_ng", False) or defaults.get("override_ng", False))
 
-    raw_prompt = _join(_first(args, "prompt", []))
-    raw_neg = _join(_first(args, "negative_prompt", []))
+    raw_prompt = _join(_first(args, "prompt", [])) or _join(wf_defaults.get("prompt"))
+    raw_neg = _join(_first(args, "negative_prompt", [])) or _join(wf_defaults.get("negative_prompt"))
     preset_p = defaults.get("preset_prompt", "") or ""
     preset_np = defaults.get("preset_negative_prompt", "") or ""
     prompt = (f"{preset_p}, {raw_prompt}" if (preset_p and not override) else raw_prompt).strip(", ")
@@ -149,7 +160,7 @@ def build_request(
         negative_prompt=negative,
         width=width,
         height=height,
-        seed=_first(args, "seed") or random.randint(0, MAX_SEED),
+        seed=_first(args, "seed") or defaults.get("seed") or random.randint(0, MAX_SEED),
         steps=int(_first(args, "steps") or defaults.get("steps", 28)),
         cfg_scale=float(_first(args, "cfg_scale") or defaults.get("cfg_scale", 7.0)),
         denoise_strength=float(_first(args, "denoise_strength") or defaults.get("denoise_strength", 1.0)),
@@ -157,7 +168,7 @@ def build_request(
         scheduler=REFLEX_DICT["scheduler"].get(scheduler, scheduler),
         batch_size=int(_first(args, "batch_size") or defaults.get("batch_size", 1)),
         batch_count=int(_first(args, "batch_count") or defaults.get("batch_count", 1)),
-        model=_first(args, "model") or settings.model or defaults.get("model", "") or "",
+        model=_first(args, "model") or wf_defaults.get("model") or settings.model or defaults.get("model", "") or "",
         override=override,
         override_ng=override_ng,
         concurrency=bool(_first(args, "concurrency", False) or defaults.get("concurrency", False)),
@@ -168,7 +179,7 @@ def build_request(
         group_id=str(group_id or ""),
         is_admin=is_admin,
         forward=bool(_first(args, "forward", False) or defaults.get("forward", False)),
-        silent=bool(_first(args, "silent", False) or settings.silent),
+        silent=bool(_first(args, "silent", False) or settings.silent or wf_defaults.get("silent", False)),
         notice=bool(_first(args, "notice", False) or defaults.get("notice", False)),
         pure=bool(_first(args, "pure", False) or defaults.get("pure", False)),
     )
@@ -191,6 +202,21 @@ def _output_map(reflex_json: dict[str, Any]) -> dict[str, list[str]]:
     return {"image": []}
 
 
+_VIDEO_SUFFIXES = (".mp4", ".webm", ".mov", ".mkv", ".gif", ".webp")
+
+
+def _animated(node_out: dict[str, Any]) -> list[dict[str, Any]]:
+    """Videos that ComfyUI's own ``SaveVideo`` reports under ``images``.
+
+    It returns ``{"images": [...], "animated": [true]}`` instead of the
+    ``gifs`` key that VideoHelperSuite uses.
+    """
+    images = node_out.get("images", []) or []
+    if any(node_out.get("animated") or []):
+        return list(images)
+    return [m for m in images if str(m.get("filename", "")).lower().endswith(_VIDEO_SUFFIXES)]
+
+
 class GenerationPipeline:
     def __init__(self, client: ComfyClient, store: WorkflowStore, settings: CoreSettings) -> None:
         self.client = client
@@ -207,23 +233,31 @@ class GenerationPipeline:
             raise InputFileNotFoundError("当前工作流需要提供输入图片！")
         timings["pre_process"] = time.monotonic() - t0
 
-        backend_url, backend_idx, _ = await self.client.select_backend(req.selected_backend)
+        available = reflex_json.get("available")
+        allowed = {int(i) for i in available} if isinstance(available, list) and available else None
+        backend_url, backend_idx, _ = await self.client.select_backend(
+            req.selected_backend, allowed=allowed, workflow=req.workflow
+        )
         if notify is not None:
             await notify(f"已选择工作流: {req.workflow} (后端 [{backend_idx}])\n正在生成中，请稍候...")
 
         if self.settings.auto_lora and req.loras:
             req.loras = match_loras(req.loras, await self.client.get_loras(backend_url))
 
-        uploaded: list[dict[str, Any]] = []
-        for img in req.init_images:
-            uploaded.append(await self.client.upload_image(backend_url, img, uuid.uuid4().hex))
-
         # Spread a concurrent batch over every reachable backend.
         targets: list[tuple[str, int]] = [(backend_url, backend_idx)] * req.batch_count
         if req.concurrency and req.batch_count > 1 and not req.selected_backend:
-            available, _ = await self.client.get_available_backends()
-            pool = [(self.client.backend_urls[i], i) for i in sorted(available)] or [(backend_url, backend_idx)]
+            reachable, _ = await self.client.get_available_backends(allowed)
+            pool = [(self.client.backend_urls[i], i) for i in sorted(reachable)] or [(backend_url, backend_idx)]
             targets = [pool[i % len(pool)] for i in range(req.batch_count)]
+
+        # Input images go to every backend that will run a task.
+        uploads: dict[str, list[dict[str, Any]]] = {}
+        for url, _idx in targets:
+            if url not in uploads:
+                uploads[url] = [
+                    await self.client.upload_image(url, img, uuid.uuid4().hex) for img in req.init_images
+                ]
 
         async def run_one(seed: int, url: str, idx: int) -> TaskResult:
             client_id = uuid.uuid4().hex
@@ -245,7 +279,7 @@ class GenerationPipeline:
                 "args": req.args,
                 "loras": req.loras,
             }
-            final_json = apply_reflex(api_json, reflex_json, params, init_images=uploaded, backend_index=idx)
+            final_json = apply_reflex(api_json, reflex_json, params, init_images=uploads[url], backend_index=idx)
             task_id, entry = await self.client.submit_and_wait(
                 url, final_json, client_id, timeout=self.settings.task_timeout
             )
@@ -277,7 +311,7 @@ class GenerationPipeline:
                     for meta in node_out.get("images", []):
                         result.images.append(await self.client.download(result.backend_url, meta))
                 elif media == "video":
-                    for meta in node_out.get("gifs", []) + node_out.get("videos", []):
+                    for meta in node_out.get("gifs", []) + node_out.get("videos", []) + _animated(node_out):
                         result.videos.append(await self.client.download(result.backend_url, meta))
                 elif media == "audio":
                     for meta in node_out.get("audio", []):

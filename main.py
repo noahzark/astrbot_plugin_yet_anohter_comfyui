@@ -16,6 +16,7 @@ from astrbot.api.star import Context, Star, StarTools
 
 from .adapter.commands import COMMANDS, EXTRA_KEY, GenerateCommandFilter
 from .adapter.config import build_settings
+from .adapter.media import collect_input_images
 from .adapter.render import build_chains
 from .adapter.workflows import install_builtin_workflows
 from .comfyui_core import __version__ as CORE_VERSION
@@ -113,9 +114,17 @@ class YetAnotherComfyUI(Star):
 
         try:
             req = build_request(
-                args, self.settings, user_id=user_id, group_id=group_id, is_admin=is_admin, is_superuser=is_superuser
+                args,
+                self.settings,
+                user_id=user_id,
+                group_id=group_id,
+                is_admin=is_admin,
+                is_superuser=is_superuser,
+                workflow_defaults=reflex.get("override") if isinstance(reflex.get("override"), dict) else None,
             )
             req.workflow = workflow
+            if reflex.get("load_image"):
+                req.init_images = await collect_input_images(event, keep_gif=bool(getattr(args, "gif", False)))
 
             async def notify(text: str) -> None:
                 await event.send(MessageChain().message(text))
@@ -153,13 +162,54 @@ class YetAnotherComfyUI(Star):
         """Parse the message body for ``workflow`` (``None`` = default).
 
         A ``-wf`` flag in the body wins over the command's own workflow, and
-        the final parse uses that workflow's ``reg_args``.
+        the parse uses that workflow's ``reg_args``.
         """
         default_wf = workflow or self.settings.default_workflow
         tokens = tokenize(body)
-        pre, _ = build_parser(default_wf).parse_known_args(tokens)
-        resolved = self.store.resolve(pre.work_flows or default_wf)
+        resolved = self.store.resolve(workflow_flag(tokens) or default_wf)
         reflex = self.store.load_reflex(resolved)
         args = build_parser(resolved, reflex.get("reg_args")).parse_args(tokens)
         args.work_flows = resolved
         return resolved, args, reflex
+
+    def can_manage(self, event: AstrMessageEvent) -> bool:
+        return event.is_admin() or event.get_sender_id() in self.settings.superusers
+
+    # ------------------------------------------------------- admin commands
+
+    @filter.command_group("comfy")
+    def comfy(self):
+        """Yet Another ComfyUI 管理命令"""
+
+    @comfy.command("reload")
+    async def comfy_reload(self, event: AstrMessageEvent):
+        """重新扫描工作流目录并刷新工作流命令（管理员）"""
+        if not self.can_manage(event):
+            yield event.plain_result("只有管理员可以重新加载工作流")
+            return
+        self.refresh_commands()
+        names = self.store.list_workflows()
+        yield event.plain_result(
+            f"已重新加载 {len(names)} 个工作流: {', '.join(names) or '无'}\n命令: {', '.join(COMMANDS.words())}"
+        )
+
+
+WORKFLOW_FLAGS = ("-wf", "-工作流")
+
+
+def workflow_flag(tokens: list[str]) -> str | None:
+    """The value of the last ``-wf``/``-工作流`` flag, read without argparse.
+
+    Read before the parser exists, because the parser depends on which
+    workflow runs (its ``reg_args``) and a full parse with the wrong one
+    misreads that workflow's own flags.
+    """
+    found = None
+    for i, tok in enumerate(tokens):
+        if tok in WORKFLOW_FLAGS and i + 1 < len(tokens):
+            found = tokens[i + 1]
+        else:
+            for flag in WORKFLOW_FLAGS:
+                if tok.startswith(flag + "="):
+                    found = tok[len(flag) + 1:]
+    return found
