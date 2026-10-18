@@ -18,7 +18,8 @@ from typing import Any, Awaitable, Callable
 
 from .client import ComfyClient
 from .constants import MAX_SEED, REFLEX_DICT
-from .exceptions import ArgsError, InputFileNotFoundError
+from .audit import ImageAuditor, TextAuditor
+from .exceptions import ArgsError, AuditError, InputFileNotFoundError, TextContentNotSafeError
 from .lora import extract_loras_from_prompt, match_loras
 from .settings import CoreSettings
 from .workflow import WorkflowStore, apply_reflex, calculate_dimensions, validate_permissions
@@ -76,6 +77,9 @@ class TaskResult:
     videos: list[bytes] = field(default_factory=list)
     audios: list[bytes] = field(default_factory=list)
     texts: list[str] = field(default_factory=list)
+    nsfw_images: list[bytes] = field(default_factory=list)
+    """Images the audit flagged; ``images`` keeps only the safe ones."""
+    audit_message: str = ""
 
 
 @dataclass
@@ -85,6 +89,8 @@ class GenerationOutcome:
     backend_index: int
     results: list[TaskResult]
     timings: dict[str, float] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    """Things the user should be told, such as a rewritten prompt."""
 
 
 def _first(args: Namespace | None, name: str, default: Any = None) -> Any:
@@ -218,10 +224,34 @@ def _animated(node_out: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 class GenerationPipeline:
-    def __init__(self, client: ComfyClient, store: WorkflowStore, settings: CoreSettings) -> None:
+    def __init__(
+        self,
+        client: ComfyClient,
+        store: WorkflowStore,
+        settings: CoreSettings,
+        image_auditor: ImageAuditor | None = None,
+        text_auditor: TextAuditor | None = None,
+    ) -> None:
         self.client = client
         self.store = store
         self.settings = settings
+        self.image_auditor = image_auditor
+        self.text_auditor = text_auditor
+
+    async def check_prompt(self, req: GenerationRequest) -> list[str]:
+        """Text audit per the group's mode: block, or rewrite ``req.prompt``."""
+        if self.text_auditor is None or not req.prompt:
+            return []
+        mode = self.text_auditor.mode_for(req.group_id)
+        if mode == 1 and await self.text_auditor.is_unsafe(req.prompt):
+            raise TextContentNotSafeError("文字提示词存在违规内容，已拦截")
+        if mode == 2:
+            try:
+                req.prompt = await self.text_auditor.rewrite(req.prompt)
+            except AuditError as e:
+                raise TextContentNotSafeError(f"提示词审核失败，已拦截: {e}")
+            return [f"由于群规则设置，提示词已被自动调整为: {req.prompt}"]
+        return []
 
     async def run(self, req: GenerationRequest, notify: ProgressCallback | None = None) -> GenerationOutcome:
         timings: dict[str, float] = {}
@@ -231,6 +261,7 @@ class GenerationPipeline:
         validate_permissions(reflex_json, req.group_id, req.is_admin)
         if reflex_json.get("load_image") and not req.init_images:
             raise InputFileNotFoundError("当前工作流需要提供输入图片！")
+        notes = await self.check_prompt(req)
         timings["pre_process"] = time.monotonic() - t0
 
         available = reflex_json.get("available")
@@ -295,13 +326,30 @@ class GenerationPipeline:
             results = [await c for c in coros]
         timings["request"] = time.monotonic() - t1
 
+        t2 = time.monotonic()
+        for result in results:
+            await self._audit(result, req.group_id)
+        if self.image_auditor is not None:
+            timings["audit"] = time.monotonic() - t2
+
         return GenerationOutcome(
             workflow=req.workflow,
             reflex_json=reflex_json,
             backend_index=backend_idx,
             results=results,
             timings=timings,
+            notes=notes,
         )
+
+    async def _audit(self, result: TaskResult, group_id: str) -> None:
+        if self.image_auditor is None:
+            return
+        safe: list[bytes] = []
+        for img in result.images:
+            verdict = await self.image_auditor.audit(img, group_id)
+            result.audit_message = verdict.get("message", "") or result.audit_message
+            (result.nsfw_images if verdict.get("is_nsfw") else safe).append(img)
+        result.images = safe
 
     async def _collect(self, result: TaskResult, outputs: dict[str, Any], reflex_json: dict[str, Any]) -> None:
         for media, nodes in _output_map(reflex_json).items():

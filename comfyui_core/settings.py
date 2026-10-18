@@ -106,14 +106,17 @@ class AuditSettings:
     gpu: bool = False
     wd_model: dict[str, Any] = field(default_factory=_default_wd_model)
     nude_model_path: str = ""
+    fail_closed: bool = True
 
 
 @dataclass
 class TextAuditSettings:
-    """Prompt text audit through an OpenAI-compatible endpoint."""
+    """Prompt text audit. The adapter's LLM is used unless ``use_endpoint``
+    asks for the OpenAI-compatible endpoint in ``openai``."""
 
     enabled: bool = False
     ban_words: list[str] = field(default_factory=list)
+    use_endpoint: bool = False
     openai: dict[str, Any] = field(default_factory=_default_openai)
 
 
@@ -141,10 +144,22 @@ class CoreSettings:
     save_image: bool = True
     silent: bool = False
     quiet: bool = False
+    img_send: int = 1
+    """Safe images: 1 as images, 2 as a QR code of the image link, 3 as the link."""
+    r18_action: int = 1
+    """Flagged images: 1 sent privately, 2 QR code, 3 link, anything else dropped."""
 
     audit: AuditSettings = field(default_factory=AuditSettings)
     text_audit: TextAuditSettings = field(default_factory=TextAuditSettings)
     group_config: dict[str, dict] = field(default_factory=_default_group_config)
+
+    def group_value(self, key: str, group_id: str, default: Any = None) -> Any:
+        """A per-group override from ``group_config[key]``, else ``default``."""
+        if group_id:
+            groups = self.group_config.get(key) or {}
+            if str(group_id) in groups:
+                return groups[str(group_id)]
+        return default
 
     def __post_init__(self) -> None:
         self.workflows_dir = Path(self.workflows_dir)

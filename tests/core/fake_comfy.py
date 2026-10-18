@@ -12,7 +12,7 @@ from aiohttp import web
 # A valid 1x1 PNG so adapters can hand the bytes to real image code.
 PNG_1X1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-    "0000000d49444154789c6360f8cfc0000003010100c9fe92ef0000000049454e44ae426082"
+    "0000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082"
 )
 
 
@@ -29,6 +29,8 @@ class FakeComfy:
         self.views: list[str] = []
         self.uploads: list[str] = []
         self.upload_status = 200  # anything else answers uploads with a proxy-style error page
+        self.rating = "general"  # what the fake sd-webui tagger rates every image
+        self.audited = 0
         self.interrupted = 0
         self.deleted: list[str] = []
         self.cleared = 0
@@ -42,6 +44,7 @@ class FakeComfy:
         self.app.router.add_get("/object_info/{node}", self.object_info)
         self.app.router.add_get("/ws", self.ws)
         self.app.router.add_get("/view", self.view)
+        self.app.router.add_post("/tagger/v1/interrogate", self.tagger)
         self._runner: web.AppRunner | None = None
         self.url = ""
 
@@ -128,6 +131,16 @@ class FakeComfy:
             return web.Response(status=self.upload_status, text="upstream connect error")
         self.uploads.append(name)
         return web.json_response({"name": name, "subfolder": "", "type": "input"})
+
+    async def tagger(self, request: web.Request) -> web.Response:
+        """sd-webui tagger API, so the remote image audit has something to call."""
+        await request.json()
+        self.audited += 1
+        if self.rating == "error":
+            return web.Response(status=502, text="bad gateway")
+        caption = {k: 0.05 for k in ("general", "sensitive", "questionable", "explicit")}
+        caption[self.rating] = 0.9
+        return web.json_response({"caption": caption})
 
     async def interrupt(self, request: web.Request) -> web.Response:
         self.interrupted += 1

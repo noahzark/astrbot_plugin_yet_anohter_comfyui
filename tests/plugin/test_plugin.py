@@ -92,7 +92,9 @@ async def test_cooldown_and_daily_limit(server, plugin_factory):
     await plugin.terminate()
 
     plugin = await plugin_factory(server, limits={"cd": 0, "day_limit": 2})
-    await drive(plugin, RecordingEvent("绘画 cat", user_id="u2"))
+    for _ in range(2):  # the limit itself is allowed
+        results = await drive(plugin, RecordingEvent("绘画 cat", user_id="u2"))
+        assert any(isinstance(c, Image) for c in results[0])
     results = await drive(plugin, RecordingEvent("绘画 cat", user_id="u2"))
     assert "调用受限" in results[0][0].text
     results = await drive(plugin, RecordingEvent("绘画 cat", user_id="u2", admin=True))

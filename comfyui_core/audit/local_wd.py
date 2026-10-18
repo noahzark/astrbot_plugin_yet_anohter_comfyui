@@ -6,10 +6,16 @@ from typing import Any
 
 from PIL import Image
 
+from ..exceptions import AuditError
 from ..settings import CoreSettings
 from .base import AuditResult, BaseAuditor, prepare_audit_image, rating_is_nsfw, resolve_audit_level
 
 logger = logging.getLogger(__name__)
+
+
+def hf_repo_id(repo_id: str) -> str:
+    """The shipped default names the model without its owner, which the Hub rejects."""
+    return repo_id if "/" in repo_id else f"SmilingWolf/{repo_id}"
 
 
 class LocalWDAuditor(BaseAuditor):
@@ -39,10 +45,11 @@ class LocalWDAuditor(BaseAuditor):
             raise
 
         wd_cfg = self.settings.audit.wd_model
-        logger.info("Loading local WD14 model %s", wd_cfg.get("repo_id"))
-        model_path = hf_hub_download(repo_id=wd_cfg["repo_id"], revision=wd_cfg.get("revision", "v2.0"),
+        repo_id = hf_repo_id(wd_cfg["repo_id"])
+        logger.info("Loading local WD14 model %s", repo_id)
+        model_path = hf_hub_download(repo_id=repo_id, revision=wd_cfg.get("revision", "v2.0"),
                                      filename=wd_cfg.get("model_path", "model.onnx"))
-        tags_path = hf_hub_download(repo_id=wd_cfg["repo_id"], revision=wd_cfg.get("revision", "v2.0"),
+        tags_path = hf_hub_download(repo_id=repo_id, revision=wd_cfg.get("revision", "v2.0"),
                                     filename=wd_cfg.get("tags_path", "selected_tags.csv"))
 
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if self.settings.audit.gpu \
@@ -88,11 +95,13 @@ class LocalWDAuditor(BaseAuditor):
             async with self._load_lock:
                 interrogator = await asyncio.to_thread(self._ensure_loaded)
         except Exception as e:
-            audit_info["message"] = f"本地 WD14 加载失败: {e}"
-            return audit_info
+            raise AuditError(f"本地 WD14 加载失败: {e}")
 
-        _, pil_img = prepare_audit_image(image_bytes, self.settings.audit.downscale)
-        ratings, _ = await asyncio.to_thread(interrogator.run_infer, pil_img)
+        try:
+            _, pil_img = prepare_audit_image(image_bytes, self.settings.audit.downscale)
+            ratings, _ = await asyncio.to_thread(interrogator.run_infer, pil_img)
+        except Exception as e:
+            raise AuditError(f"WD14 推理失败: {e}")
 
         top_category, top_score = max(ratings.items(), key=lambda x: x[1])
         level = resolve_audit_level(self.settings.audit.level, self.settings.group_config, group_id)

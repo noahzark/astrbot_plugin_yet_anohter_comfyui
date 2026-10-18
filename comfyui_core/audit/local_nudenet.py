@@ -7,6 +7,7 @@ import tempfile
 from typing import Any
 
 from ..constants import NUDENET_UNSAFE_LABELS
+from ..exceptions import AuditError
 from ..settings import CoreSettings
 from .base import AuditResult, BaseAuditor
 
@@ -41,8 +42,7 @@ class LocalNudeNetAuditor(BaseAuditor):
             async with self._load_lock:
                 detector = await asyncio.to_thread(self._ensure_loaded)
         except Exception as e:
-            audit_info["message"] = f"NudeNet 加载失败: {e}"
-            return audit_info
+            raise AuditError(f"NudeNet 加载失败: {e}")
 
         tmp_path = ""
         try:
@@ -51,10 +51,7 @@ class LocalNudeNetAuditor(BaseAuditor):
                 tmp_path = tmp_file.name
             detections = await asyncio.to_thread(detector.detect, tmp_path)
         except Exception as e:
-            logger.error("NudeNet detection failed: %s", e)
-            audit_info["is_nsfw"] = True
-            audit_info["message"] = f"NudeNet 检测错误: {e}"
-            return audit_info
+            raise AuditError(f"NudeNet 检测错误: {e}")
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
