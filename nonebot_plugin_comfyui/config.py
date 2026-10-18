@@ -193,7 +193,11 @@ def init_workflows_dir(workflows_dir_path: str | Path) -> None:
     wf_dir = Path(workflows_dir_path).resolve()
     if not wf_dir.exists():
         wf_dir.mkdir(parents=True, exist_ok=True)
-        build_in_wf = PLUGIN_DIR / "build_in_wf"
+        # The built-in workflows now live at the repository root, shared with
+        # the AstrBot plugin; the in-package path is kept for old installs.
+        build_in_wf = PLUGIN_DIR.parent / "build_in_wf"
+        if not build_in_wf.exists():
+            build_in_wf = PLUGIN_DIR / "build_in_wf"
         if build_in_wf.exists():
             for file in build_in_wf.iterdir():
                 if file.is_file():

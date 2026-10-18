@@ -54,6 +54,25 @@ class WorkflowStore:
             return []
         return names
 
+    def resolve(self, name: str) -> str:
+        """Turn what a user typed after ``-wf`` into a workflow name.
+
+        Exact name first, then a 1-based index, then a unique substring.
+        """
+        names = self.list_workflows()
+        if name in names:
+            return name
+        if name.isdigit():
+            hit = self.list_workflows(index=int(name))
+            if hit:
+                return hit[0]
+        partial = [n for n in names if name in n]
+        if len(partial) == 1:
+            return partial[0]
+        if len(partial) > 1:
+            raise ArgsError(f"工作流名称 {name} 不唯一，匹配到: {', '.join(partial)}")
+        raise ReflexJsonNotFoundError(f"未找到工作流: {name}")
+
     def load(self, wf_name: str) -> tuple[dict[str, Any], dict[str, Any]]:
         api_path = self.dir / f"{wf_name}.json"
         reflex_path = self.dir / f"{wf_name}_reflex.json"

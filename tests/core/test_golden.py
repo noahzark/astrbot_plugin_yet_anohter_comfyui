@@ -15,7 +15,7 @@ from comfyui_core.exceptions import ArgsError
 from comfyui_core.lora import apply_loras_to_api_json, extract_loras_from_prompt
 from comfyui_core.workflow import apply_reflex, calculate_dimensions
 
-from conftest import golden_cases, golden_ids
+from golden_util import golden_cases, golden_ids
 
 SEED = 20261018
 

@@ -15,5 +15,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -r requirements-core.txt -r requirements-dev.txt
-      - run: pytest -q
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest -q tests/core
+
+  plugin:
+    # main.py inside a real AstrBot install (tests/plugin skips without it).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: astrbot_plugin_yet_anohter_comfyui
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "astrbot==4.29.1" -r astrbot_plugin_yet_anohter_comfyui/requirements.txt -r astrbot_plugin_yet_anohter_comfyui/requirements-dev.txt
+      - run: pytest -q tests/plugin -p no:cacheprovider
+        working-directory: astrbot_plugin_yet_anohter_comfyui

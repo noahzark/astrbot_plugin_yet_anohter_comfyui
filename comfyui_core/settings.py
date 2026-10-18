@@ -122,9 +122,13 @@ class CoreSettings:
     backend_urls: list[str] = field(default_factory=lambda: ["http://127.0.0.1:8188"])
     timeout: int = 5
     http_proxy: str = ""
+    model: str = ""
+    task_timeout: int = 1800
 
     workflows_dir: Path = Path("./data/comfyui")
     default_workflow: str = "txt2img"
+    trigger_words: list[str] = field(default_factory=lambda: ["comfyui执行"])
+    auto_lora: bool = False
     base_res: int = 1024
     shape_preset: dict[str, tuple[int, int]] = field(default_factory=_default_shape_preset)
     default_value: dict[str, Any] = field(default_factory=_default_value)
@@ -132,6 +136,11 @@ class CoreSettings:
 
     cd: int = 20
     day_limit: int = 50
+    superusers: list[str] = field(default_factory=list)
+
+    save_image: bool = True
+    silent: bool = False
+    quiet: bool = False
 
     audit: AuditSettings = field(default_factory=AuditSettings)
     text_audit: TextAuditSettings = field(default_factory=TextAuditSettings)
@@ -141,3 +150,4 @@ class CoreSettings:
         self.workflows_dir = Path(self.workflows_dir)
         # JSON configs give lists; the engine wants tuples for presets.
         self.shape_preset = {k: (int(v[0]), int(v[1])) for k, v in self.shape_preset.items()}
+        self.superusers = [str(u) for u in self.superusers]

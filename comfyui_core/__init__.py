@@ -7,6 +7,7 @@ that talks to a user lives in an adapter on top of it.
 """
 from .settings import CoreSettings, AuditSettings, TextAuditSettings
 from .exceptions import ComfyuiExceptions, ComfyUIPluginError
+from .pipeline import GenerationOutcome, GenerationPipeline, GenerationRequest, TaskResult, build_request
 from . import constants
 
 __version__ = constants.PLUGIN_VERSION
@@ -17,6 +18,11 @@ __all__ = [
     "TextAuditSettings",
     "ComfyuiExceptions",
     "ComfyUIPluginError",
+    "GenerationOutcome",
+    "GenerationPipeline",
+    "GenerationRequest",
+    "TaskResult",
+    "build_request",
     "constants",
     "__version__",
 ]

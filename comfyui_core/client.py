@@ -18,9 +18,12 @@ import aiohttp
 from aiohttp import TCPConnector
 
 from .exceptions import (
-    ComfyuiBackendConnectionError,
-    NoAvailableBackendError,
     APIJsonError,
+    ComfyuiBackendConnectionError,
+    GetResultError,
+    InterruptError,
+    NoAvailableBackendError,
+    TaskError,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,34 +177,155 @@ class ComfyClient:
         async with session.post(f"{backend_url}/upload/image", data=form) as resp:
             return json.loads(await resp.read())
 
-    async def track_task(self, backend_url: str, task_id: str, client_id: str, timeout: int = 1800) -> None:
-        """Follow a prompt over the ``/ws`` socket until it finishes."""
+    def _ws_kwargs(self) -> dict[str, Any]:
+        ws_timeout = getattr(aiohttp, "ClientWSTimeout", None)
+        if ws_timeout:
+            return {"timeout": ws_timeout(ws_close=30.0)}
+        return {"timeout": 30.0}
+
+    async def open_ws(self, backend_url: str, client_id: str) -> aiohttp.ClientWebSocketResponse | None:
+        """Open the progress socket. Returns ``None`` when the socket is
+        unavailable so callers can fall back to polling ``/history``."""
         session = await self.get_session()
         ws_url = f"{backend_url}/ws?clientId={client_id}"
-        start_time = time.time()
+        try:
+            return await session.ws_connect(ws_url, **self._ws_kwargs())
+        except Exception as e:
+            logger.warning("WebSocket to %s unavailable, will poll history: %s", backend_url, e)
+            return None
 
-        ws_timeout = getattr(aiohttp, "ClientWSTimeout", None)
-        ws_kwargs = {"timeout": ws_timeout(ws_close=30.0)} if ws_timeout else {"timeout": 30.0}
-        async with session.ws_connect(ws_url, **ws_kwargs) as ws:
-            logger.info("Tracking task %s on %s", task_id, backend_url)
-            async for msg in ws:
-                if time.time() - start_time > timeout:
+    async def wait_for_task(
+        self,
+        backend_url: str,
+        task_id: str,
+        ws: aiohttp.ClientWebSocketResponse | None,
+        timeout: float = 1800,
+        recv_timeout: float = 30,
+        poll_interval: float = 2,
+    ) -> dict[str, Any]:
+        """Block until ``task_id`` finishes and return its history entry.
+
+        Progress comes over ``ws`` when there is one. Every receive has a
+        timeout; when it fires (or the socket is missing) ``/history`` is
+        polled so a dropped socket never hangs the task. Errors and
+        interrupts reported by ComfyUI raise :class:`TaskError` /
+        :class:`InterruptError` instead of waiting forever.
+        """
+        deadline = time.monotonic() + timeout
+
+        async def poll_once() -> dict[str, Any] | None:
+            hist = await self.get_history(backend_url, task_id)
+            entry = hist.get(task_id) if isinstance(hist, dict) else None
+            if not entry:
+                return None
+            status = entry.get("status", {}) or {}
+            if status.get("status_str") == "error":
+                raise TaskError(f"任务 {task_id} 执行出错: {_history_error_text(status)}")
+            if status.get("completed") or entry.get("outputs"):
+                return entry
+            return None
+
+        try:
+            while True:
+                if time.monotonic() > deadline:
                     raise TimeoutError(f"任务 {task_id} 等待超时")
 
-                if msg.type == aiohttp.WSMsgType.TEXT:
+                if ws is None or ws.closed:
+                    entry = await poll_once()
+                    if entry is not None:
+                        return entry
+                    await asyncio.sleep(poll_interval)
+                    continue
+
+                try:
+                    msg = await ws.receive(timeout=min(recv_timeout, max(deadline - time.monotonic(), 0.1)))
+                except asyncio.TimeoutError:
+                    entry = await poll_once()
+                    if entry is not None:
+                        return entry
+                    continue
+
+                if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSE):
+                    logger.warning("WebSocket closed while tracking %s, polling history", task_id)
+                    ws = None
+                    continue
+                if msg.type == aiohttp.WSMsgType.ERROR:
+                    logger.warning("WebSocket error while tracking %s: %s", task_id, ws.exception())
+                    ws = None
+                    continue
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    continue
+
+                try:
                     data = json.loads(msg.data)
-                    msg_type = data.get("type")
-                    if msg_type == "progress" and data.get("data", {}).get("prompt_id") == task_id:
-                        logger.debug("task %s progress %s/%s", task_id[:8],
-                                     data["data"].get("value"), data["data"].get("max"))
-                    elif msg_type == "executing":
-                        exec_data = data.get("data", {})
-                        if exec_data.get("node") is None and exec_data.get("prompt_id") == task_id:
-                            logger.info("Task %s finished", task_id)
-                            break
-                elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error("WebSocket error while tracking %s: %s", task_id, msg.data)
-                    break
+                except ValueError:
+                    continue
+                msg_type = data.get("type")
+                payload = data.get("data", {}) or {}
+                if payload.get("prompt_id") not in (None, task_id):
+                    continue
+
+                if msg_type == "progress":
+                    logger.debug("task %s progress %s/%s", task_id[:8], payload.get("value"), payload.get("max"))
+                elif msg_type == "execution_error":
+                    raise TaskError(f"任务 {task_id} 执行出错: {_ws_error_text(payload)}")
+                elif msg_type == "execution_interrupted":
+                    raise InterruptError(f"任务 {task_id} 已被中断")
+                elif msg_type == "execution_success" or (
+                    msg_type == "executing" and payload.get("node") is None and payload.get("prompt_id") == task_id
+                ):
+                    logger.info("Task %s finished", task_id)
+                    entry = await poll_once()
+                    if entry is not None:
+                        return entry
+                    # History can lag the socket by a moment.
+                    ws = None
+        finally:
+            if ws is not None and not ws.closed:
+                try:
+                    await ws.close()
+                except Exception:  # pragma: no cover - best effort
+                    pass
+
+    async def submit_and_wait(
+        self,
+        backend_url: str,
+        prompt_json: dict,
+        client_id: str,
+        timeout: float = 1800,
+    ) -> tuple[str, dict[str, Any]]:
+        """POST a prompt and wait for it. Returns ``(task_id, history_entry)``.
+
+        The socket is opened *before* the POST so no progress message can be
+        missed between the two.
+        """
+        ws = await self.open_ws(backend_url, client_id)
+        try:
+            task_id = await self.post_prompt(backend_url, prompt_json, client_id)
+        except Exception:
+            if ws is not None:
+                await ws.close()
+            raise
+        entry = await self.wait_for_task(backend_url, task_id, ws, timeout=timeout)
+        return task_id, entry
+
+    async def track_task(self, backend_url: str, task_id: str, client_id: str, timeout: int = 1800) -> None:
+        """Follow an already-posted prompt until it finishes."""
+        ws = await self.open_ws(backend_url, client_id)
+        await self.wait_for_task(backend_url, task_id, ws, timeout=timeout)
+
+    @staticmethod
+    def view_url(backend_url: str, meta: dict[str, Any]) -> str:
+        fn = meta["filename"]
+        sub = meta.get("subfolder", "")
+        kind = meta.get("type", "")
+        return f"{backend_url}/view?filename={fn}&subfolder={sub}&type={kind}"
+
+    async def download(self, backend_url: str, meta: dict[str, Any]) -> bytes:
+        data = await self.request("GET", self.view_url(backend_url, meta), as_json=False)
+        if not isinstance(data, (bytes, bytearray)):
+            raise GetResultError(f"下载 {meta.get('filename')} 失败")
+        return bytes(data)
 
     async def get_history(self, backend_url: str, task_id: str) -> dict[str, Any]:
         return await self.request("GET", f"{backend_url}/history/{task_id}")
@@ -228,3 +352,16 @@ class ComfyClient:
             return resp["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
         except Exception:
             return []
+
+
+def _ws_error_text(payload: dict[str, Any]) -> str:
+    node = payload.get("node_type") or payload.get("node_id") or "?"
+    exc = payload.get("exception_message") or payload.get("exception_type") or "unknown error"
+    return f"[{node}] {exc}"
+
+
+def _history_error_text(status: dict[str, Any]) -> str:
+    for name, detail in status.get("messages", []) or []:
+        if name == "execution_error" and isinstance(detail, dict):
+            return _ws_error_text(detail)
+    return "unknown error"

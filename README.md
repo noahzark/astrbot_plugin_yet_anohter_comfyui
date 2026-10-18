@@ -17,6 +17,15 @@ _⭐ 本插件适配多后端，可以同时使用多个后端生图 ⭐_
 
 ---
 
+> **AstrBot 版本（开发中）**
+>
+> 本仓库正在把插件移植到 [AstrBot](https://github.com/AstrBotDevs/AstrBot)。仓库根目录就是 AstrBot 插件
+> （`main.py` / `metadata.yaml` / `_conf_schema.json`），把本仓库放进 AstrBot 的 `data/plugins/` 目录即可加载，
+> 工作流文件格式（`<名称>.json` + `<名称>_reflex.json`）与 NoneBot 版本完全一致，首次启动会把 `build_in_wf/`
+> 里的内置工作流复制到 `data/plugin_data/astrbot_plugin_yet_anohter_comfyui/workflows/`。
+> 当前已支持：`/prompt`、`/绘画`（以及各工作流 reflex 里的 `command`）文生图、多后端、冷却与每日上限。
+> 图片审核、队列管理、LLM 工具等功能正在迁移中；`nonebot_plugin_comfyui/` 目录在迁移完成前继续保留。
+
 ## 📑 目录
 
 - [介绍](#-介绍)

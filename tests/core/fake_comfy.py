@@ -9,10 +9,24 @@ from typing import Any
 from aiohttp import web
 
 
+# A valid 1x1 PNG so adapters can hand the bytes to real image code.
+PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c6360f8cfc0000003010100c9fe92ef0000000049454e44ae426082"
+)
+
+
 class FakeComfy:
-    def __init__(self, queue_remaining: int = 0) -> None:
+    """``ws_mode``: ``ok`` reports progress then success, ``error`` reports an
+    ``execution_error``, ``interrupt`` an ``execution_interrupted``, ``silent``
+    never sends anything (history must be polled), ``refuse`` rejects the
+    socket upgrade."""
+
+    def __init__(self, queue_remaining: int = 0, ws_mode: str = "ok") -> None:
         self.queue_remaining = queue_remaining
+        self.ws_mode = ws_mode
         self.prompts: dict[str, dict] = {}
+        self.views: list[str] = []
         self.uploads: list[str] = []
         self.interrupted = 0
         self.deleted: list[str] = []
@@ -26,6 +40,7 @@ class FakeComfy:
         self.app.router.add_post("/queue", self.queue)
         self.app.router.add_get("/object_info/{node}", self.object_info)
         self.app.router.add_get("/ws", self.ws)
+        self.app.router.add_get("/view", self.view)
         self._runner: web.AppRunner | None = None
         self.url = ""
 
@@ -53,13 +68,28 @@ class FakeComfy:
         self.prompts[pid] = body
         return web.json_response({"prompt_id": pid, "number": len(self.prompts), "node_errors": {}})
 
+    def _history_entry(self, pid: str) -> dict:
+        if self.ws_mode == "error":
+            return {"outputs": {}, "status": {"status_str": "error", "completed": False, "messages": [
+                ["execution_error", {"prompt_id": pid, "node_id": "3", "node_type": "KSampler",
+                                     "exception_message": "CUDA out of memory"}]]}}
+        body = self.prompts[pid]["prompt"]
+        n_images = 1
+        for node in body.values():
+            if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
+                n_images = int(node["inputs"].get("batch_size", 1))
+        images = [{"filename": f"{pid[:8]}_{i}.png", "subfolder": "", "type": "output"} for i in range(n_images)]
+        return {"outputs": {"9": {"images": images}}, "status": {"status_str": "success", "completed": True}}
+
     async def history(self, request: web.Request) -> web.Response:
         pid = request.match_info["pid"]
         if pid not in self.prompts:
             return web.json_response({})
-        return web.json_response({pid: {"outputs": {"9": {"images": [
-            {"filename": "out.png", "subfolder": "", "type": "output"}]}},
-            "status": {"status_str": "success", "completed": True}}})
+        return web.json_response({pid: self._history_entry(pid)})
+
+    async def view(self, request: web.Request) -> web.Response:
+        self.views.append(request.query.get("filename", ""))
+        return web.Response(body=PNG_1X1, content_type="image/png")
 
     async def upload(self, request: web.Request) -> web.Response:
         reader = await request.multipart()
@@ -93,14 +123,36 @@ class FakeComfy:
         return web.json_response({node: {"input": {"required": {key: [["a.safetensors", "b.safetensors"]]}}}})
 
     async def ws(self, request: web.Request) -> web.WebSocketResponse:
+        if self.ws_mode == "refuse":
+            raise web.HTTPNotFound()
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        # Report on the newest prompt: a little progress, then done.
-        await asyncio.sleep(0.05)
-        pid = next(reversed(self.prompts), "none")
-        for i in (1, 2):
-            await ws.send_str(json.dumps({"type": "progress", "data": {"prompt_id": pid, "value": i, "max": 2}}))
-        await ws.send_str(json.dumps({"type": "executing", "data": {"prompt_id": pid, "node": None}}))
-        await asyncio.sleep(0.5)
-        await ws.close()
+        client_id = request.query.get("clientId", "")
+
+        if self.ws_mode != "silent":
+            # Wait for a prompt from this client (the client connects first).
+            pid = None
+            for _ in range(200):
+                pid = next((p for p, body in reversed(self.prompts.items()) if body.get("client_id") == client_id), None)
+                if pid:
+                    break
+                await asyncio.sleep(0.01)
+            pid = pid or "none"
+            if self.ws_mode == "error":
+                await ws.send_str(json.dumps({"type": "execution_error", "data": {
+                    "prompt_id": pid, "node_id": "3", "node_type": "KSampler",
+                    "exception_message": "CUDA out of memory"}}))
+            elif self.ws_mode == "interrupt":
+                await ws.send_str(json.dumps({"type": "execution_interrupted", "data": {"prompt_id": pid}}))
+            else:
+                for i in (1, 2):
+                    await ws.send_str(json.dumps({"type": "progress", "data": {"prompt_id": pid, "value": i, "max": 2}}))
+                await ws.send_str(json.dumps({"type": "executing", "data": {"prompt_id": pid, "node": None}}))
+
+        # Stay open until the client goes away, like the real server.
+        try:
+            async for _ in ws:
+                pass
+        except Exception:
+            pass
         return ws

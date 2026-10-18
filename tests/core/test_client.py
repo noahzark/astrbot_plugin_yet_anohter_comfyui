@@ -51,7 +51,7 @@ async def test_prompt_track_history_roundtrip(client, servers):
     pid = await client.post_prompt(a.url, {"3": {"inputs": {}}}, "cid")
     await client.track_task(a.url, pid, "cid", timeout=5)
     hist = await client.get_history(a.url, pid)
-    assert hist[pid]["outputs"]["9"]["images"][0]["filename"] == "out.png"
+    assert hist[pid]["outputs"]["9"]["images"][0]["filename"].endswith("_0.png")
 
 
 async def test_post_prompt_error_raises(client, servers):

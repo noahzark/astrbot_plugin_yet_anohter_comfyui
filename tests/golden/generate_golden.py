@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 PKG_DIR = ROOT / "nonebot_plugin_comfyui"
-WF_DIR = PKG_DIR / "build_in_wf"
+WF_DIR = ROOT / "build_in_wf"
 SEED = 20261018
 
 sys.path.insert(0, str(HERE / "stubs"))

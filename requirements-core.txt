@@ -1,3 +1,0 @@
-# Runtime dependencies of comfyui_core (the platform-free engine).
-aiohttp>=3.10
-pillow>=10
