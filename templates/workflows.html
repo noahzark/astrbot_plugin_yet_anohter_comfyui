@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; width: 1400px; background: #eef1f5; color: #1f2933;
+         font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: 16px; }
+  h1 { margin: 0 0 16px 4px; font-size: 28px; color: #2c3e50; }
+  .wrap { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #2c3e50; color: #fff; text-align: left; padding: 12px 14px; font-weight: 600; white-space: nowrap; }
+  td.nw { white-space: nowrap; }
+  td { padding: 12px 14px; border-bottom: 1px solid #e4e7eb; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8f9fb; }
+  code { color: #c0392b; background: rgba(192,57,43,.08); padding: 1px 6px; border-radius: 4px; }
+  .muted { color: #8a97a5; }
+  .tag { display: inline-block; background: #e8f4ff; border-radius: 6px; padding: 0 8px; margin: 1px 0; }
+  .sub { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .sub td, .sub th { padding: 4px 6px; border: 1px solid #e4e7eb; background: #fff; color: #1f2933; font-weight: normal; }
+  .sub th { background: #f1f3f5; }
+</style>
+</head>
+<body>
+  <h1>ComfyUI 工作流（{{ rows|length }}）</h1>
+  <div class="wrap">
+  <table>
+    <tr><th>#</th><th>名称</th><th>命令</th><th>说明</th><th>输入图片</th><th>每日次数</th><th>可用后端</th><th>默认值</th><th>专属参数</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.index }}</td>
+      <td class="nw"><b>{{ r.name }}</b>{% if r.admin %}<div class="tag">仅管理员</div>{% endif %}<div class="muted">{{ r.media }}</div></td>
+      <td class="nw">{% if r.command %}<code>{{ r.command }}</code>{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td>{{ r.note or '-' }}</td>
+      <td class="nw">{% if r.needs_image %}需要 {{ r.image_count }} 张{% else %}<span class="muted">否</span>{% endif %}</td>
+      <td class="nw">{{ r.day_limit }}</td>
+      <td class="nw">{{ r.available }}</td>
+      <td>{% for o in r.override %}<div class="tag">{{ o }}</div>{% else %}<span class="muted">-</span>{% endfor %}</td>
+      <td>
+        {% if r.reg_args %}
+        <table class="sub"><tr><th>参数</th><th>类型</th><th>默认</th><th>说明</th></tr>
+          {% for a in r.reg_args %}<tr><td><code>{{ a.flag }}</code></td><td>{{ a.type }}</td><td>{{ a.default }}</td><td>{{ a.help }}</td></tr>{% endfor %}
+        </table>
+        {% else %}<span class="muted">-</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="muted">用 -wf 序号或名称选择工作流，例如 prompt 1girl -wf 2</p>
+</body>
+</html>

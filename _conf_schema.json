@@ -169,6 +169,12 @@
         "type": "int",
         "default": 1,
         "hint": "审核判定违规的图片：1 私聊发给用户；2 群里发二维码；3 群里发链接；其他值直接拦截。2 和 3 只在 QQ 上可用，其他平台拦截。"
+      },
+      "cards": {
+        "description": "用图片卡片显示帮助等信息",
+        "type": "bool",
+        "default": true,
+        "hint": "帮助、工作流列表和后端状态通过 AstrBot 的文转图服务渲染成图片；关闭或渲染失败时发送文字。"
       }
     }
   },
@@ -301,6 +307,54 @@
             }
           }
         }
+      }
+    }
+  },
+  "llm": {
+    "description": "LLM 提示词",
+    "type": "object",
+    "items": {
+      "provider": {
+        "description": "llm-tag 使用的模型",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider",
+        "hint": "留空则使用当前会话正在使用的模型。"
+      },
+      "system_prompt": {
+        "description": "系统提示词",
+        "type": "text",
+        "default": "",
+        "hint": "留空使用内置的英文提示词生成规则。"
+      },
+      "presets": {
+        "description": "预设",
+        "type": "template_list",
+        "default": [],
+        "hint": "llm-tag -llm N 使用第 N 个预设；-llm 0 或没有对应预设时使用上面的默认设置。",
+        "templates": {
+          "preset": {
+            "name": "预设",
+            "display_item": "name",
+            "items": {
+              "name": {"description": "名称", "type": "string", "default": ""},
+              "provider": {"description": "模型", "type": "string", "default": "", "_special": "select_provider", "hint": "留空则使用上面的模型。"},
+              "system_prompt": {"description": "系统提示词", "type": "text", "default": "", "hint": "留空则使用上面的系统提示词。"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "misc": {
+    "description": "其他",
+    "type": "object",
+    "items": {
+      "update_check": {
+        "description": "启动时检查更新",
+        "type": "bool",
+        "default": true,
+        "hint": "从 GitHub Releases 检查新版本，有新版本时记录日志并显示在帮助里。"
       }
     }
   }

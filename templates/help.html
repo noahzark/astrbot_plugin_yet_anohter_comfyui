@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; width: 1100px; background: #eef1f5; color: #1f2933;
+         font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: 17px; }
+  .card { background: #fff; border-radius: 12px; padding: 24px 28px; margin-bottom: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  h1 { margin: 0 0 6px; font-size: 30px; color: #2c3e50; }
+  h2 { margin: 0 0 14px; font-size: 21px; color: #2c3e50; border-left: 4px solid #3498db; padding-left: 10px; }
+  .sub { color: #6b7785; }
+  code { color: #c0392b; background: rgba(192,57,43,.08); padding: 1px 6px; border-radius: 4px; font-family: "JetBrains Mono", Consolas, monospace; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .item { background: #f6f8fb; border-radius: 8px; padding: 10px 12px; }
+  .item .desc { color: #52606d; font-size: 15px; margin-top: 4px; }
+  .item .ex { color: #8a97a5; font-size: 14px; margin-top: 4px; }
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; }
+  .preset { background: #e8f4ff; border-radius: 8px; padding: 6px 12px; }
+  .notice { background: #fff4e5; border-left: 4px solid #f39c12; padding: 10px 14px; border-radius: 6px; margin-top: 8px; }
+  .foot { text-align: center; color: #8a97a5; font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Yet Another ComfyUI</h1>
+    <div class="sub">发送 <code>prompt 提示词 [参数]</code> 生图，提示词需要用英文；含单引号时用双引号括起来，例如 <code>prompt "girl's"</code></div>
+    {% for n in notices %}<div class="notice">{{ n }}</div>{% endfor %}
+  </div>
+
+  {% if reg_commands %}
+  <div class="card">
+    <h2>工作流命令</h2>
+    <div class="grid">
+      {% for c in reg_commands %}
+      <div class="item"><code>{{ c.command }}</code>{% if c.note %}<div class="desc">{{ c.note }}</div>{% endif %}</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>生图参数</h2>
+    <div class="grid">
+      {% for p in parameters %}
+      <div class="item"><code>{{ p.flag }}</code> {{ p.description }}{% if p.example %}<div class="ex">{{ p.example }}</div>{% endif %}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>分辨率预设 <span class="sub">（-r 名称）</span></h2>
+    <div class="presets">
+      {% for s in shape_presets %}<div class="preset"><b>{{ s.name }}</b> {{ s.width }}×{{ s.height }}</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>其他命令</h2>
+    <div class="grid">
+      {% for c in other_commands %}
+      <div class="item"><code>{{ c.command }}</code><div class="desc">{{ c.description }}</div><div class="ex">{{ c.example }}</div></div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>queue 参数</h2>
+    <div class="grid">
+      {% for p in queue_params %}
+      <div class="item"><code>{{ p.flag }}</code><div class="desc">{{ p.description }}</div><div class="ex">{{ p.example }}</div></div>
+      {% endfor %}
+    </div>
+    <h2 style="margin-top:18px">capi 参数</h2>
+    <div class="grid">
+      {% for p in capi_params %}
+      <div class="item"><code>{{ p.flag }}</code><div class="desc">{{ p.description }}</div><div class="ex">{{ p.example }}</div></div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="foot">Yet Another ComfyUI {{ version }} · github.com/noahzark/astrbot_plugin_yet_anohter_comfyui</div>
+</body>
+</html>

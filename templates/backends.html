@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; width: 900px; background: #eef1f5; color: #1f2933;
+         font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: 17px; }
+  h1 { margin: 0 0 16px 4px; font-size: 28px; color: #2c3e50; }
+  .card { background: #fff; border-radius: 12px; padding: 18px 22px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .head { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; }
+  .ok { background: #2ecc71; } .busy { background: #f39c12; } .err { background: #e74c3c; }
+  .url { color: #8a97a5; font-weight: normal; font-size: 15px; }
+  .grid { display: grid; grid-template-columns: 160px 1fr; gap: 4px 12px; margin-top: 12px; }
+  .k { color: #6b7785; }
+  code { color: #c0392b; font-size: 14px; }
+  .error { color: #c0392b; margin-top: 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>ComfyUI 后端状态</h1>
+  {% for n in nodes %}
+  <div class="card">
+    <div class="head">
+      <span class="dot {% if n.error %}err{% elif n.queue.pending_count %}busy{% else %}ok{% endif %}"></span>
+      后端 {{ n.index }} <span class="url">{{ n.url }}</span>
+    </div>
+    {% if n.system %}
+    <div class="grid">
+      <div class="k">显卡</div><div>{{ n.system.device_name or 'N/A' }}</div>
+      <div class="k">显存（空闲/总）</div><div>{{ n.system.vram_free_gb }} / {{ n.system.vram_total_gb }} GB</div>
+      <div class="k">ComfyUI</div><div>{{ n.system.comfyui_version }}</div>
+      <div class="k">PyTorch / Python</div><div>{{ n.system.pytorch_version }} / {{ n.system.python_version }}</div>
+      {% if n.queue %}
+      <div class="k">队列</div><div>运行 {{ n.queue.running_count }}，排队 {{ n.queue.pending_count }}</div>
+      {% if n.queue.running_ids %}<div class="k">正在执行</div><div>{% for t in n.queue.running_ids %}<code>{{ t }}</code> {% endfor %}</div>{% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if n.error %}<div class="error">{{ n.error }}</div>{% endif %}
+  </div>
+  {% else %}
+  <div class="card">没有配置后端</div>
+  {% endfor %}
+</body>
+</html>
