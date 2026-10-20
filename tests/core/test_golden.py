@@ -1,7 +1,8 @@
 """The ported engine must reproduce the nonebot engine byte for byte.
 
-Fixtures come from ``tests/golden/generate_golden.py``; see that file for
-how they were made and when to regenerate them.
+Fixtures in ``tests/golden/cases.json`` were generated from the original
+nonebot engine. The generator and the nonebot package were removed in 1.0.0;
+both are in git history (``tests/golden/generate_golden.py`` before that).
 """
 import argparse
 import json

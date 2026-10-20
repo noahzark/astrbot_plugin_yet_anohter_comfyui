@@ -2,9 +2,6 @@
 comfyui-test-bot
 
 __pycache__/
-./nonebot_plugin_comfyui/__pycache__/
-.pdm-python
-pdm.lock
 dist/
 
 /comfyui_work_flows/output/

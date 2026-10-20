@@ -1,7 +1,7 @@
 name: astrbot_plugin_yet_anohter_comfyui
 display_name: Yet Another ComfyUI
 desc: 通过 ComfyUI 工作流进行 AI 绘画。兼容 nonebot-plugin-comfyui 的 workflow.json + workflow_reflex.json 工作流定义，支持多后端。
-version: 0.1.0
+version: 1.0.0
 author: noahzark
 repo: https://github.com/noahzark/astrbot_plugin_yet_anohter_comfyui
 astrbot_version: ">=4.25,<5"
