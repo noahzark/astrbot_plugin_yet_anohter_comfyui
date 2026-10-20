@@ -3,3 +3,4 @@
 aiohttp>=3.10
 pillow>=10
 qrcode>=7
+pyyaml>=6

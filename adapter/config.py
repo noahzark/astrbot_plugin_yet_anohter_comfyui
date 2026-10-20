@@ -154,3 +154,22 @@ def build_settings(cfg: Mapping[str, Any], data_dir: Path) -> CoreSettings:
         text_audit=build_text_audit(_section(cfg, "text_audit")),
         group_config=parse_group_overrides(_section(cfg, "groups").get("overrides")),
     )
+
+
+def cards_enabled(cfg: Mapping[str, Any]) -> bool:
+    return bool(_section(cfg, "delivery").get("cards", True))
+
+
+def update_check_enabled(cfg: Mapping[str, Any]) -> bool:
+    return bool(_section(cfg, "misc").get("update_check", True))
+
+
+def llm_settings(cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """The ``llm`` section: default provider and system prompt, and the ``-llm N`` presets."""
+    llm = _section(cfg, "llm")
+    presets = [dict(p) for p in (llm.get("presets") or []) if isinstance(p, Mapping)]
+    return {
+        "provider": str(llm.get("provider") or ""),
+        "system_prompt": str(llm.get("system_prompt") or ""),
+        "presets": presets,
+    }

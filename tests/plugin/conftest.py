@@ -37,6 +37,7 @@ def plugin_factory(tmp_path, monkeypatch):
         cfg["backend"]["timeout"] = 2
         cfg["backend"]["task_timeout"] = 10
         cfg["audit"]["site"] = server.url  # never reach the real public tagger from tests
+        cfg["misc"]["update_check"] = False  # nor GitHub
         for section, values in overrides.items():
             cfg[section].update(values)
         monkeypatch.setattr(plugin_main.YetAnotherComfyUI, "resolve_data_dir", lambda self: tmp_path / "data")

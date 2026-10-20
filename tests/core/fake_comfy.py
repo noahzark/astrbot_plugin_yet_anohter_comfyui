@@ -42,6 +42,10 @@ class FakeComfy:
         self.app.router.add_post("/interrupt", self.interrupt)
         self.app.router.add_post("/queue", self.queue)
         self.app.router.add_get("/object_info/{node}", self.object_info)
+        self.app.router.add_get("/object_info", self.all_object_info)
+        self.app.router.add_get("/queue", self.get_queue)
+        self.app.router.add_get("/history", self.all_history)
+        self.app.router.add_get("/system_stats", self.system_stats)
         self.app.router.add_get("/ws", self.ws)
         self.app.router.add_get("/view", self.view)
         self.app.router.add_post("/tagger/v1/interrogate", self.tagger)
@@ -152,6 +156,22 @@ class FakeComfy:
             self.cleared += 1
         self.deleted += body.get("delete", [])
         return web.Response(text="")
+
+    async def get_queue(self, request: web.Request) -> web.Response:
+        pending = [[i, f"pending-{i}", {}, {}, []] for i in range(self.queue_remaining)]
+        return web.json_response({"queue_running": [[0, "running-0", {}, {}, []]], "queue_pending": pending})
+
+    async def all_history(self, request: web.Request) -> web.Response:
+        return web.json_response({pid: self._history_entry(pid) for pid in self.prompts})
+
+    async def system_stats(self, request: web.Request) -> web.Response:
+        return web.json_response({
+            "system": {"comfyui_version": "0.3.99", "python_version": "3.12.1 (main) [GCC]", "pytorch_version": "2.6.0"},
+            "devices": [{"name": "cuda:0 NVIDIA RTX 4090", "vram_total": 24 * 1024 ** 3, "vram_free": 20 * 1024 ** 3}],
+        })
+
+    async def all_object_info(self, request: web.Request) -> web.Response:
+        return web.json_response({"KSampler": {}, "SaveImage": {}, "LoraLoader": {}})
 
     async def object_info(self, request: web.Request) -> web.Response:
         node = request.match_info["node"]
