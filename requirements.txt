@@ -1,5 +1,4 @@
 # Runtime dependencies of the AstrBot plugin (installed by AstrBot on load).
-# The legacy nonebot package's dependencies live in pyproject.toml.
 aiohttp>=3.10
 pillow>=10
 qrcode>=7

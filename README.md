@@ -16,7 +16,7 @@ _⭐ 支持多后端，可以同时使用多个后端生图 ⭐_
 
 > 本插件移植自 [nonebot-plugin-comfyui](https://github.com/DiaoDaiaChan/nonebot-plugin-comfyui)。
 > 工作流文件格式（`<名称>.json` + `<名称>_reflex.json`）与 NoneBot 版本完全一致，原来的工作流可以直接拿来用。
-> 让 AstrBot 的 LLM 直接调用画图的工具仍在迁移中；`nonebot_plugin_comfyui/` 目录在迁移完成前继续保留。
+> NoneBot 版的代码已从仓库中移除，需要时可以在 git 历史（1.0.0 之前的提交）里找到。
 > 从 NoneBot 版迁移的用户可以用 `/comfy import-config` 一次性导入原来的 `config/comfyui.yaml`。
 
 ## 📑 目录
@@ -162,6 +162,18 @@ _⭐ 支持多后端，可以同时使用多个后端生图 ⭐_
 /图生图 make her hair blue [引用一张图片]
 /绘画 a long video prompt -wf wan22_video -notice
 ```
+
+### 让 LLM 画图
+
+插件向 AstrBot 注册了两个 LLM 工具，开启函数调用的模型可以在对话中直接画图：
+
+| 工具 | 说明 |
+|:---|:---|
+| `comfyui_draw(prompt, workflow)` | 用英文 tag 生成图片；`workflow` 可留空（使用默认工作流）。工具立即返回「已开始生成」，图片生成后自动发到当前会话 |
+| `comfyui_list_workflows()` | 列出可用的工作流，供模型挑选 `workflow` |
+
+LLM 发起的生成和命令一样受群开关、工作流权限、冷却、每日上限和审核约束，消息里的图片会作为图生图等工作流的输入。
+不需要时可以在 AstrBot 管理面板的函数工具管理里停用这两个工具。
 
 ---
 

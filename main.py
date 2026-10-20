@@ -10,6 +10,7 @@ import asyncio
 import contextvars
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -45,7 +46,7 @@ from .comfyui_core.pipeline import GenerationPipeline, build_request
 from .comfyui_core.screenshot import workflow_screenshot
 from .comfyui_core.tasks import TaskRecords
 from .comfyui_core.updates import check_update
-from .comfyui_core.workflow import WorkflowStore
+from .comfyui_core.workflow import WorkflowStore, validate_permissions
 
 PLUGIN_NAME = "astrbot_plugin_yet_anohter_comfyui"
 USAGE_KEY = "daily_usage"
@@ -173,11 +174,14 @@ class YetAnotherComfyUI(Star):
         body: str,
         workflow: str | None,
         adjust: Callable[[Any], Awaitable[None]] | None = None,
+        temp_files: list[Path] | None = None,
     ):
         """Parse ``body`` for ``workflow`` and generate.
 
         ``adjust`` may rewrite the parsed arguments (二次元的我, llm-tag); it
         runs after the cooldown check, so a user in cooldown costs nothing.
+        Throwaway output files are tracked on the event, or collected in
+        ``temp_files`` when the caller outlives it (the LLM tool).
         """
         user_id = event.get_sender_id()
         group_id = event.get_group_id()
@@ -276,7 +280,10 @@ class YetAnotherComfyUI(Star):
         chains = await delivery.build(req, outcome)
         if not self.settings.save_image:
             for path in delivery.written:
-                event.track_temporary_local_file(str(path))
+                if temp_files is not None:
+                    temp_files.append(path)
+                else:
+                    event.track_temporary_local_file(str(path))
 
         if req.forward and qq.is_qq(event):
             chains = qq.forward_chains(event, chains)
@@ -594,6 +601,59 @@ class YetAnotherComfyUI(Star):
                 event.track_temporary_local_file(str(path))
                 chain.append(Comp.Image.fromFileSystem(str(path)))
         yield event.chain_result(chain)
+
+    # ------------------------------------------------------------ LLM tools
+
+    @filter.llm_tool(name="comfyui_draw")
+    async def comfyui_draw(self, event: AstrMessageEvent, prompt: str, workflow: str = ""):
+        """Draw a picture with ComfyUI and send it to the user when it is ready. Use when the user asks for an image, illustration or drawing. Images attached to the user's message are used as input by workflows that need one.
+
+        Args:
+            prompt(string): The image description as comma-separated English tags, for example "1girl, solo, cherry blossoms, masterpiece". Translate the request into English.
+            workflow(string): Optional workflow name from comfyui_list_workflows. Leave empty for the default text-to-image workflow.
+        """
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return "prompt is empty; describe the picture in English tags"
+        if self.settings.group_value("enable_in_group", event.get_group_id(), 1) in (0, False):
+            return "Drawing is disabled in this group; tell the user."
+        name: str | None = None
+        if workflow and workflow.strip():
+            try:
+                name = self.store.resolve(workflow.strip())
+                validate_permissions(self.store.load_reflex(name), event.get_group_id(), self.can_manage(event))
+            except ComfyuiExceptions as e:
+                return f"workflow error: {e}. Call comfyui_list_workflows to see the available workflows."
+        user_id = event.get_sender_id()
+        in_cd, remain = self.limiter.check_cd(user_id, self.can_manage(event))
+        if in_cd:
+            return f"The user is in cooldown for {remain} more seconds; tell them to wait and do not retry now."
+        self.spawn(self.draw_in_background(event, shlex.quote(prompt), name))
+        return (
+            f"Generation started with workflow {name or self.settings.default_workflow}. "
+            "The picture will be sent to the user automatically when it is ready; tell them it is on the way "
+            "and do not describe or invent the result."
+        )
+
+    async def draw_in_background(self, event: AstrMessageEvent, body: str, workflow: str | None) -> None:
+        """Run a tool-started generation and send its messages to the conversation."""
+        temp_files: list[Path] = []
+        umo = event.unified_msg_origin
+        try:
+            async for result in self.run_generation(event, body, workflow, temp_files=temp_files):
+                if result is not None and result.chain:
+                    await self.context.send_message(umo, MessageChain(chain=list(result.chain)))
+        except Exception:
+            logger.exception("ComfyUI generation started by the LLM failed")
+        finally:
+            for path in temp_files:
+                path.unlink(missing_ok=True)
+
+    @filter.llm_tool(name="comfyui_list_workflows")
+    async def comfyui_list_workflows(self, event: AstrMessageEvent):
+        """List the ComfyUI workflows that comfyui_draw can use, with what each one does and whether it needs an input image."""
+        rows = info.workflow_rows(self.store)
+        return info.workflows_text(rows) + f"\n默认工作流: {self.settings.default_workflow}"
 
     # ------------------------------------------------------- admin commands
 
