@@ -168,8 +168,8 @@ ComfyUI 导出的工作流 JSON 文件中，参数通常是固定死的（如种
 | `append_negative_prompt` | 否 | - | 将工作流中自带的负面提示词添加到输入中 |
 | `replace_prompt` | 否 | - | 将输入提示词替换到工作流中的 `{prompt}` 中 |
 | `replace_negative_prompt` | 否 | - | 将输入负面提示词替换到工作流中的 `{prompt}` 中 |
-| `upscale` | 是 | `upscale_1.5` | 对数字进行乘算，数字为倍率 |
-| `value` | 是 | `value_你的值_值的类型` | 固定工作流中的数值（优先级最高） |
+| `upscale` | 是 | `upscale_1.5` | 把生成宽度或高度乘以倍率：输入名含 `width`（或为 `w`、`*_w`、`w_*`）时用宽度，否则用高度 |
+| `value` | 是 | `value_你的值_值的类型` | 固定工作流中的数值（优先级最高）；省略类型（`value_你的值`）时按字符串写入 |
 | `image` | 是 | `image_0` | 适用于需要加载多个图片的工作流 |
 
 ---
