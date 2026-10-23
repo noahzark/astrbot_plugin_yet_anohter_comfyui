@@ -1,8 +1,12 @@
-"""The ported engine must reproduce the nonebot engine byte for byte.
+"""The engine must reproduce the nonebot engine byte for byte.
 
 Fixtures in ``tests/golden/cases.json`` were generated from the original
 nonebot engine. The generator and the nonebot package were removed in 1.0.0;
 both are in git history (``tests/golden/generate_golden.py`` before that).
+The engine is now the ``comfyui_reflex`` library, so these cases also guard
+against behaviour changes when its pinned version is bumped. Edited by hand
+for comfyui-reflex 0.1.0: the auto-inserted LoRA node title, and ``-ar``
+without a colon is now an error.
 """
 import argparse
 import json

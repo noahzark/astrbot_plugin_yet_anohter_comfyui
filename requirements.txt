@@ -1,5 +1,6 @@
 # Runtime dependencies of the AstrBot plugin (installed by AstrBot on load).
 aiohttp>=3.10
+comfyui-reflex==0.1.0
 pillow>=10
 qrcode>=7
 pyyaml>=6

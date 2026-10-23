@@ -264,5 +264,6 @@ LLM 发起的生成和命令一样受群开关、工作流权限、冷却、每�
 ## 💝 特别鸣谢
 
 - [nonebot-plugin-comfyui](https://github.com/DiaoDaiaChan/nonebot-plugin-comfyui) - 本插件的前身，工作流格式和大部分功能都来自它
+- [comfyui-reflex](https://pypi.org/project/comfyui-reflex/) - 从 nonebot-plugin-comfyui 拆出的 reflex 引擎，本插件改写工作流用的就是它
 - [AstrBot](https://github.com/AstrBotDevs/AstrBot) - 插件运行的聊天机器人框架
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI) - 强大的节点式 AI 工作流工具

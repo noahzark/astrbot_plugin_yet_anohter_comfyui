@@ -5,7 +5,7 @@ import pytest
 
 from comfyui_core.cli import build_parser, tokenize
 from comfyui_core.client import ComfyClient
-from comfyui_core.exceptions import ComfyuiBackendConnectionError, NoAvailableBackendForSelectedWorkflow
+from comfyui_core.exceptions import ArgsError, ComfyuiBackendConnectionError, NoAvailableBackendForSelectedWorkflow
 from comfyui_core.pipeline import GenerationPipeline, build_request
 from comfyui_core.settings import CoreSettings
 from comfyui_core.workflow import WorkflowStore, apply_reflex
@@ -37,6 +37,35 @@ def test_prompt_reaches_string_primitives_but_not_other_values():
     linked = copy.deepcopy(PRIMITIVE_API)
     linked["1"]["inputs"]["value"] = ["5", 0]
     assert apply_reflex(linked, reflex, {"prompt": "a fox"})["1"]["inputs"]["value"] == ["5", 0]
+
+
+def test_string_primitive_keeps_what_an_override_action_wrote():
+    reflex = {"prompt": {"1": {"override": {"value": "append_prompt"}}}, "output": 9}
+    out = apply_reflex(PRIMITIVE_API, reflex, {"prompt": "a fox, "})
+    assert out["1"]["inputs"]["value"] == "a fox, baked prompt"
+
+    # -o skips append_prompt, so the text box falls back to the plain prompt.
+    out = apply_reflex(PRIMITIVE_API, reflex, {"prompt": "a fox", "override": True})
+    assert out["1"]["inputs"]["value"] == "a fox"
+
+
+def test_reg_arg_without_default_left_out_keeps_the_graph_value():
+    api = {"5": {"class_type": "AudioLength", "inputs": {"seconds": 30}}}
+    reg_args = {"5": {"args": [{"name_or_flags": ["-sec"], "type": "int", "dest": "seconds"}]}}
+    out = apply_reflex(api, {"reg_args": reg_args}, {"args": parse("a song", "music", reg_args)})
+    assert out["5"]["inputs"]["seconds"] == 30
+
+
+def test_override_value_and_upscale_actions():
+    api = {"8": {"class_type": "Custom", "inputs": {"label": "", "upscale_w": 0, "upscale_h": 0}}}
+    reflex = {"x": {"8": {"override": {"label": "value_hello", "upscale_w": "upscale_2", "upscale_h": "upscale_2"}}}}
+    out = apply_reflex(api, reflex, {"width": 800, "height": 1200})
+    assert out["8"]["inputs"] == {"label": "hello", "upscale_w": 1600, "upscale_h": 2400}
+
+
+def test_ratio_without_colon_is_an_error():
+    with pytest.raises(ArgsError):
+        build_request(parse("a fox -ar 169"), CoreSettings())
 
 
 QWEN_OVERRIDE = {"width": 1024, "height": 1024, "steps": 25, "cfg_scale": 1.0, "sampler": "euler",

@@ -8860,7 +8860,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    },
    "6": {
@@ -9720,7 +9720,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    },
    "12": {
@@ -9739,7 +9739,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    }
   }
@@ -10025,7 +10025,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    }
   }
@@ -10287,7 +10287,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    }
   }
@@ -10553,7 +10553,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    },
    "21": {
@@ -10572,7 +10572,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-     "title": "nonebot_plugin_comfyui auto load"
+     "title": "comfyui_reflex auto load"
     }
    }
   }
@@ -11118,10 +11118,7 @@
    "width": 300,
    "height": 400
   },
-  "expected": [
-   300,
-   400
-  ]
+  "expected_error": "ArgsError"
  },
  {
   "kind": "dimensions",
