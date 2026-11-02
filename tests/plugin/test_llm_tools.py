@@ -115,3 +115,10 @@ async def test_list_workflows(make):
     plugin = await make()
     text = await plugin.comfyui_list_workflows(RecordingEvent("x"))
     assert "txt2img" in text and "默认工作流: txt2img" in text
+
+
+async def test_draw_says_when_the_workflow_is_random(make):
+    plugin = await make(workflow={"random_workflows": ["txt2img"]})
+    answer = await plugin.comfyui_draw(RecordingEvent("画一张图"), prompt="1girl")
+    assert "randomly picked" in answer
+    await settle(plugin)

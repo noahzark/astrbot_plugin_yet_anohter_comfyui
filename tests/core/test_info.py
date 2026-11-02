@@ -15,7 +15,7 @@ from comfyui_core.importer import import_nonebot_config, merge_into
 from comfyui_core.settings import AuditSettings, CoreSettings
 from comfyui_core.tasks import TaskRecords
 from comfyui_core.updates import check_update, version_tuple
-from comfyui_core.workflow import WorkflowStore
+from comfyui_core.workflow import WorkflowStore, image_override_indices, wants_images
 
 from fake_comfy import FakeComfy
 from golden_util import BUILT_IN_WF, ROOT
@@ -254,3 +254,26 @@ def test_importer_modes_and_endpoint():
     merge_into(target, import_nonebot_config({"comfyui_audit_local": True, "comfyui_default_value": {"steps": 30}}))
     assert target["audit"] == {"level": 2, "mode": "wd14"}
     assert target["generation"]["defaults"] == {"steps": 30, "cfg_scale": 7}
+
+
+def test_image_override_actions_count_as_image_input(tmp_path):
+    reflex = {"prompt": 6, "image": {"10": {"override": {"image": "image_0"}}, "11": {"override": {"image": "image_1"}}}}
+    assert wants_images(reflex) and image_override_indices(reflex) == {0, 1}
+    assert wants_images({"load_image": 10})
+    assert not wants_images({"prompt": 6, "override": {"denoise_strength": 0.5},
+                             "seed": {"3": {"override": {"seed": "randint"}}}})
+
+    (tmp_path / "multi.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "multi_reflex.json").write_text(json.dumps(reflex), encoding="utf-8")
+    row = info.workflow_rows(WorkflowStore(tmp_path))[0]
+    assert row["needs_image"] and row["image_count"] == 2
+
+
+def test_importer_keeps_random_workflows():
+    res = import_nonebot_config({"comfyui_url": "http://a", "comfyui_multi_backend": False,
+                                 "comfyui_random_wf": True, "comfyui_random_wf_list": ["flux", "sdxl"]})
+    assert res.config["workflow"]["random_workflows"] == ["flux", "sdxl"]
+    assert res.unmapped == [] and res.notes == []  # multi_backend is used for the URLs, not "unused"
+
+    off = import_nonebot_config({"comfyui_random_wf": False, "comfyui_random_wf_list": ["flux"]})
+    assert "workflow" not in off.config and off.unmapped == [] and off.notes == []

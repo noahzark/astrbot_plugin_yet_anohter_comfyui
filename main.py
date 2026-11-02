@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import random
 import re
 import shlex
 from pathlib import Path
@@ -19,7 +20,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, StarTools
 
-from .adapter.cards import TEMPLATE_DIR, card
+from .adapter.cards import TEMPLATE_DIR, card, rendered_image
 from .adapter.commands import COMMANDS, EXTRA_KEY, GenerateCommandFilter
 from .adapter.config import build_settings, cards_enabled, llm_settings, text_audit_provider, update_check_enabled
 from .adapter.media import collect_input_images
@@ -46,7 +47,7 @@ from .comfyui_core.pipeline import GenerationPipeline, build_request
 from .comfyui_core.screenshot import workflow_screenshot
 from .comfyui_core.tasks import TaskRecords
 from .comfyui_core.updates import check_update
-from .comfyui_core.workflow import WorkflowStore, validate_permissions
+from .comfyui_core.workflow import WorkflowStore, validate_permissions, wants_images
 
 PLUGIN_NAME = "astrbot_plugin_yet_anohter_comfyui"
 USAGE_KEY = "daily_usage"
@@ -82,6 +83,7 @@ class YetAnotherComfyUI(Star):
         self.tasks = TaskRecords()
         self.update_notice = ""
         self._background: set[asyncio.Task] = set()
+        self._stopped = False
         self.configure()
 
     def configure(self) -> None:
@@ -140,9 +142,15 @@ class YetAnotherComfyUI(Star):
 
     async def terminate(self) -> None:
         qq.cancel_pending()
-        for task in list(self._background):
+        tasks = list(self._background)
+        for task in tasks:
             task.cancel()
-        await self.client.close()
+        if tasks:
+            # Cancelled generations refund their quota; let them save it before the new instance loads it.
+            await asyncio.wait(tasks, timeout=5)
+        # From here on a generation still running in a handler must not overwrite the new instance's data.
+        self._stopped = True
+        await self.client.retire()
 
     def spawn(self, coro: Awaitable[Any]) -> None:
         task = asyncio.ensure_future(coro)
@@ -161,12 +169,11 @@ class YetAnotherComfyUI(Star):
     async def generate(self, event: AstrMessageEvent):
         """prompt / 工作流命令: 用 ComfyUI 生成图片。加 -h 查看全部参数。"""
         word = event.get_extra(EXTRA_KEY) or ""
-        try:
-            async for result in self.run_generation(event, COMMANDS.strip(word, event.message_str), COMMANDS.workflow_for(word)):
-                yield result
-        finally:
-            # Only after the last yield: AstrBot drops results of an already stopped event.
-            event.stop_event()
+        async for result in self.run_generation(event, COMMANDS.strip(word, event.message_str), COMMANDS.workflow_for(word)):
+            yield result
+        # Only after the last yield (AstrBot drops results of a stopped event), and only when nothing
+        # was raised: AstrBot tells the user about an exception unless the event is already stopped.
+        event.stop_event()
 
     async def run_generation(
         self,
@@ -180,13 +187,15 @@ class YetAnotherComfyUI(Star):
 
         ``adjust`` may rewrite the parsed arguments (二次元的我, llm-tag); it
         runs after the cooldown check, so a user in cooldown costs nothing.
+        A ``workflow`` of ``None`` means the default one, or a random pick
+        from ``workflow.random_workflows``.
         Throwaway output files are tracked on the event, or collected in
         ``temp_files`` when the caller outlives it (the LLM tool).
         """
         user_id = event.get_sender_id()
         group_id = event.get_group_id()
-        is_admin = event.is_admin()
-        is_superuser = is_admin or user_id in self.settings.superusers
+        # Plugin superusers count as admins: admin-only workflows, -be URLs, no limits.
+        is_admin = is_superuser = self.can_manage(event)
 
         if self.settings.group_value("enable_in_group", group_id, 1) in (0, False):
             yield event.plain_result("本群已禁用 ComfyUI 生图插件")
@@ -204,6 +213,8 @@ class YetAnotherComfyUI(Star):
             if not await qq.send_text_and_recall(event, text, qq.RECALL_COOLDOWN):
                 yield event.plain_result(text)
             return
+        # Claimed before the first await; given back if the request is turned away below.
+        previous_cd = self.limiter.claim_cd(user_id)
 
         try:
             if adjust is not None:
@@ -218,32 +229,62 @@ class YetAnotherComfyUI(Star):
                 workflow_defaults=reflex.get("override") if isinstance(reflex.get("override"), dict) else None,
             )
             req.workflow = workflow
+            daily_key = self.limiter.get_today_key(user_id)
+            total = req.total_images
+            limit_msg, reached = self.limiter.check_daily_limit(
+                daily_key, total, is_superuser, wf_name=workflow, wf_limit=reflex.get("daylimit")
+            )
         except ComfyuiExceptions as e:
+            self.limiter.release_cd(user_id, previous_cd)
             yield event.plain_result(str(e))
             return
-
-        daily_key = self.limiter.get_today_key(user_id)
-        total = req.total_images
-        limit_msg, reached = self.limiter.check_daily_limit(
-            daily_key, total, is_superuser, wf_name=workflow, wf_limit=reflex.get("daylimit")
-        )
+        except BaseException:
+            self.limiter.release_cd(user_id, previous_cd)
+            raise
         if reached:
+            self.limiter.release_cd(user_id, previous_cd)
             text = f"调用受限: {limit_msg}"
             if not await qq.send_text_and_recall(event, text, qq.RECALL_LIMIT):
                 yield event.plain_result(text)
             return
-        self.limiter.update_cd(user_id)
         await self.save_usage()
 
         async def notify(text: str) -> None:
             await self.say(event, text, qq.RECALL_NOTICE)
 
+        pipeline = self.pipeline  # import-config may swap it while this runs
         token = CURRENT_UMO.set(event.unified_msg_origin)
         try:
-            if reflex.get("load_image"):
-                req.init_images = await collect_input_images(event, keep_gif=bool(getattr(args, "gif", False)))
-            quiet = req.silent or self.settings.quiet
-            outcome = await self.pipeline.run(req, notify=None if quiet else notify)
+            async with pipeline.client.job():
+                if wants_images(reflex):
+                    req.init_images = await collect_input_images(event, keep_gif=bool(getattr(args, "gif", False)))
+                quiet = req.silent or self.settings.quiet
+                outcome = await pipeline.run(req, notify=None if quiet else notify)
+
+            for result in outcome.results:
+                self.tasks.record(user_id, result.task_id, workflow, result.backend_index)
+            await self.save_tasks()
+
+            if req.notice:
+                ids = ", ".join(r.task_id for r in outcome.results)
+                await self.dm(event, [Comp.Plain(f"您的生图任务已完成 (ID: {ids})")])
+
+            delivery = Delivery(
+                data_dir=self.data_dir,
+                persistent=self.settings.save_image,
+                img_send=int(self.settings.group_value("img_send", group_id, self.settings.img_send)),
+                r18_action=self.settings.r18_action,
+                pure=bool(self.settings.group_value("pure", group_id, False)),
+                reply_to=str(getattr(event.message_obj, "message_id", "") or "") or None,
+                link_for=(lambda img: qq.image_link(event, img)) if qq.is_qq(event) else None,
+                dm=lambda chain: self.dm(event, chain),
+            )
+            chains = await delivery.build(req, outcome)
+        except asyncio.CancelledError:
+            # terminate() cancels LLM-tool generations; refund before it lets the new instance load the quota.
+            self.limiter.revert_daily(daily_key, total, wf_name=workflow)
+            await self.save_usage()
+            raise
         except Exception as e:
             self.limiter.revert_daily(daily_key, total, wf_name=workflow)
             await self.save_usage()
@@ -259,25 +300,6 @@ class YetAnotherComfyUI(Star):
         finally:
             CURRENT_UMO.reset(token)
 
-        for result in outcome.results:
-            self.tasks.record(user_id, result.task_id, workflow, result.backend_index)
-        await self.save_tasks()
-
-        if req.notice:
-            ids = ", ".join(r.task_id for r in outcome.results)
-            await self.dm(event, [Comp.Plain(f"您的生图任务已完成 (ID: {ids})")])
-
-        delivery = Delivery(
-            data_dir=self.data_dir,
-            persistent=self.settings.save_image,
-            img_send=int(self.settings.group_value("img_send", group_id, self.settings.img_send)),
-            r18_action=self.settings.r18_action,
-            pure=bool(self.settings.group_value("pure", group_id, False)),
-            reply_to=str(getattr(event.message_obj, "message_id", "") or "") or None,
-            link_for=(lambda img: qq.image_link(event, img)) if qq.is_qq(event) else None,
-            dm=lambda chain: self.dm(event, chain),
-        )
-        chains = await delivery.build(req, outcome)
         if not self.settings.save_image:
             for path in delivery.written:
                 if temp_files is not None:
@@ -317,6 +339,8 @@ class YetAnotherComfyUI(Star):
             logger.debug("Daily usage not restored: %s", e)
 
     async def save_usage(self) -> None:
+        if self._stopped:
+            return
         try:
             await self.put_kv_data(USAGE_KEY, self.limiter.snapshot())
         except Exception as e:
@@ -329,6 +353,8 @@ class YetAnotherComfyUI(Star):
             logger.debug("Task history not restored: %s", e)
 
     async def save_tasks(self) -> None:
+        if self._stopped:
+            return
         try:
             await self.put_kv_data(TASKS_KEY, self.tasks.snapshot())
         except Exception as e:
@@ -342,9 +368,11 @@ class YetAnotherComfyUI(Star):
         A ``-wf`` flag in the body wins over the command's own workflow, and
         the parse uses that workflow's ``reg_args``.
         """
-        default_wf = workflow or self.settings.default_workflow
         tokens = tokenize(body)
-        resolved = self.store.resolve(workflow_flag(tokens) or default_wf)
+        chosen = workflow_flag(tokens) or workflow
+        if not chosen and self.settings.random_workflows:
+            chosen = random.choice(self.settings.random_workflows)
+        resolved = self.store.resolve(chosen or self.settings.default_workflow)
         reflex = self.store.load_reflex(resolved)
         args = build_parser(resolved, reflex.get("reg_args")).parse_args(tokens)
         args.work_flows = resolved
@@ -388,7 +416,7 @@ class YetAnotherComfyUI(Star):
         if self.cards:
             try:
                 guide = await self.text_to_image((TEMPLATE_DIR / "guide.md").read_text(encoding="utf-8"))
-                yield event.chain_result([Comp.Plain("基础使用教程\n"), Comp.Image.fromURL(guide)])
+                yield event.chain_result([Comp.Plain("基础使用教程\n"), rendered_image(guide)])
             except Exception as e:
                 logger.debug("Usage guide not rendered: %s", e)
 
@@ -519,11 +547,9 @@ class YetAnotherComfyUI(Star):
             args.silent = True
             await self.say(event, f"锵锵~~~{description}\n正在为你生成二次元图像捏", qq.RECALL_NOTICE)
 
-        try:
-            async for r in self.run_generation(event, command_body(event), None, adjust):
-                yield r
-        finally:
-            event.stop_event()
+        async for r in self.run_generation(event, command_body(event), None, adjust):
+            yield r
+        event.stop_event()  # see generate()
 
     @filter.command("llm-tag")
     async def llm_tag(self, event: AstrMessageEvent):
@@ -553,11 +579,9 @@ class YetAnotherComfyUI(Star):
             args.silent = True
             await self.say(event, f"LLM 扩写结果:\n{result}", qq.RECALL_LIMIT)
 
-        try:
-            async for r in self.run_generation(event, body, None, adjust):
-                yield r
-        finally:
-            event.stop_event()
+        async for r in self.run_generation(event, body, None, adjust):
+            yield r
+        event.stop_event()  # see generate()
 
     @filter.command("dan", alias={"查tag"})
     async def danbooru_cmd(self, event: AstrMessageEvent):
@@ -629,8 +653,12 @@ class YetAnotherComfyUI(Star):
         if in_cd:
             return f"The user is in cooldown for {remain} more seconds; tell them to wait and do not retry now."
         self.spawn(self.draw_in_background(event, shlex.quote(prompt), name))
+        if name or not self.settings.random_workflows:
+            chosen = f"workflow {name or self.settings.default_workflow}"
+        else:
+            chosen = "a randomly picked workflow"
         return (
-            f"Generation started with workflow {name or self.settings.default_workflow}. "
+            f"Generation started with {chosen}. "
             "The picture will be sent to the user automatically when it is ready; tell them it is on the way "
             "and do not describe or invent the result."
         )
@@ -697,7 +725,7 @@ class YetAnotherComfyUI(Star):
         merge_into(self.config, result)
         if hasattr(self.config, "save_config"):
             self.config.save_config()
-        await self.client.close()
+        await self.client.retire()
         self.configure()
         self.refresh_commands()
         lines = [f"已导入 {sum(len(v) for v in result.config.values())} 项设置: {', '.join(result.config)}"]

@@ -80,7 +80,7 @@ def build_audit(audit: Mapping[str, Any]) -> AuditSettings:
     if audit.get("wd_repo_id"):
         wd_model["repo_id"] = str(audit["wd_repo_id"])
     return AuditSettings(
-        enabled=bool(audit.get("enabled", base.enabled)),
+        enabled=bool(audit.get("enabled", False)),  # off unless the admin opts in
         mode=str(audit.get("mode") or base.mode),
         level=int(audit.get("level", base.level)),
         site=str(audit.get("site") or base.site).rstrip("/"),
@@ -136,6 +136,7 @@ def build_settings(cfg: Mapping[str, Any], data_dir: Path) -> CoreSettings:
         model=str(backend.get("model") or ""),
         workflows_dir=Path(workflows_dir) if workflows_dir else data_dir / "workflows",
         default_workflow=str(workflow.get("default_workflow") or base.default_workflow),
+        random_workflows=[str(w).strip() for w in (workflow.get("random_workflows") or []) if str(w).strip()],
         trigger_words=[str(w) for w in (workflow.get("trigger_words") or []) if str(w).strip()],
         auto_lora=bool(workflow.get("auto_lora", False)),
         base_res=int(generation.get("base_res") or base.base_res),

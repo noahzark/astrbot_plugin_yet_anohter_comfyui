@@ -1,7 +1,9 @@
 """The milestone-2 deliverable: ``/绘画 1girl -ar 16:9 -s 1`` returns an image."""
+import json
+import shutil
 from pathlib import Path
 
-from astrbot.core.message.components import Image, Plain, Reply
+from astrbot.core.message.components import Image, Plain, Record, Reply
 
 from plugin_env import RecordingEvent, drive, plugin_commands
 from fake_comfy import PNG_1X1
@@ -124,3 +126,30 @@ def test_filter_ignores_unwoken_and_unknown_messages(server):
     assert not f.filter(ev, {})
     assert not f.filter(RecordingEvent("hello 绘画"), {})
     assert not f.filter(RecordingEvent("绘画师傅 cat"), {})
+
+
+def kinds(results):
+    return {type(c) for chain in results for c in chain}
+
+
+async def test_superusers_count_as_admins(server, plugin_factory):
+    plugin = await plugin_factory(server, limits={"cd": 0, "superusers": ["10001"]})
+    wf_dir = Path(plugin.settings.workflows_dir)
+    shutil.copy(wf_dir / "txt2img.json", wf_dir / "adminwf.json")
+    reflex = {"sampler": 3, "image_size": 5, "output": 9, "prompt": 6, "negative_prompt": 7, "admin": True}
+    (wf_dir / "adminwf_reflex.json").write_text(json.dumps(reflex), encoding="utf-8")
+
+    results = await drive(plugin, RecordingEvent("prompt cat -wf adminwf", user_id="20002"))
+    assert "仅限管理员" in results[-1][0].text and not server.prompts
+
+    results = await drive(plugin, RecordingEvent(f"prompt cat -wf adminwf -be {server.url}", user_id="10001"))
+    assert Image in kinds(results)
+    await plugin.terminate()
+
+
+async def test_random_workflows_only_replace_the_default(server, plugin_factory):
+    plugin = await plugin_factory(server, limits={"cd": 0}, workflow={"random_workflows": ["music_gen"]})
+    assert Record in kinds(await drive(plugin, RecordingEvent("prompt piano")))
+    assert Image in kinds(await drive(plugin, RecordingEvent("prompt cat -wf txt2img")))
+    assert Image in kinds(await drive(plugin, RecordingEvent("绘画 cat")))  # a workflow's own command
+    await plugin.terminate()

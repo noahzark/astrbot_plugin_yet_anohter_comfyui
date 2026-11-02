@@ -130,6 +130,9 @@ class CoreSettings:
 
     workflows_dir: Path = Path("./data/comfyui")
     default_workflow: str = "txt2img"
+    random_workflows: list[str] = field(default_factory=list)
+    """Commands without a workflow of their own pick one of these at random
+    (nonebot's ``comfyui_random_wf``); empty means ``default_workflow``."""
     trigger_words: list[str] = field(default_factory=lambda: ["comfyui执行"])
     auto_lora: bool = False
     base_res: int = 1024

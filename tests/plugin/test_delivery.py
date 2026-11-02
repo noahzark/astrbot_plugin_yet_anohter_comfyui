@@ -1,13 +1,15 @@
 """Milestone 4: limits that survive restarts, audit outcomes, group overrides, delivery modes."""
 import asyncio
 import importlib
+import json
 
 import pytest
 from astrbot.core.message.components import Image, Node, Nodes, Plain
 
-from plugin_env import ROOT, RecordingEvent, drive, plugin_main
+from plugin_env import ROOT, AstrBotConfig, RecordingEvent, drive, plugin_main
 
 qq = importlib.import_module(f"{ROOT.name}.adapter.qq")
+config = importlib.import_module(f"{ROOT.name}.adapter.config")
 
 
 class FakeQQBot:
@@ -206,3 +208,9 @@ async def test_text_audit_blocks_prompt(server, plugin_factory, ctx):
     assert not server.prompts
     assert any(isinstance(c, Image) for c in flat(await drive(plugin, RecordingEvent("绘画 cat"))))
     await plugin.terminate()
+
+
+def test_image_audit_is_off_by_default(tmp_path):
+    schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
+    cfg = AstrBotConfig(config_path=str(tmp_path / "cfg.json"), schema=schema)
+    assert config.build_settings(cfg, tmp_path).audit.enabled is False

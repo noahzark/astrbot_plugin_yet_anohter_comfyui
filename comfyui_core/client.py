@@ -1,11 +1,14 @@
 """HTTP and WebSocket client for one or more ComfyUI backends.
 
 One ``ComfyClient`` owns one ``aiohttp.ClientSession``; the adapter creates
-it when the plugin starts and awaits :meth:`close` when it stops.
+it when the plugin starts and awaits :meth:`retire` when it stops. A
+generation wrapped in :meth:`job` keeps the session open until it ends, so
+a reload does not cut off (or leak a session for) work already running.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
@@ -37,10 +40,14 @@ class ComfyClient:
         self.http_proxy = http_proxy
         self._session: aiohttp.ClientSession | None = None
         self._lock = asyncio.Lock()
+        self._jobs = 0
+        self._retired = False
 
     async def get_session(self) -> aiohttp.ClientSession:
         async with self._lock:
             if self._session is None or self._session.closed:
+                if self._retired and not self._jobs:
+                    raise ComfyuiBackendConnectionError("插件已停止或正在重新加载，请稍后再试")
                 ssl_ctx = ssl.create_default_context()
                 ssl_ctx.set_ciphers("DEFAULT")
                 ssl_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -55,6 +62,26 @@ class ComfyClient:
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
+
+    @contextlib.asynccontextmanager
+    async def job(self):
+        """Hold the session open for one generation, even across :meth:`retire`."""
+        self._jobs += 1
+        try:
+            yield self
+        finally:
+            self._jobs -= 1
+            if self._retired and not self._jobs:
+                await self.close()
+
+    async def retire(self) -> None:
+        """Close the session now, or when the last running :meth:`job` ends.
+
+        A retired client opens no new session once it is idle.
+        """
+        self._retired = True
+        if not self._jobs:
+            await self.close()
 
     async def request(
         self,

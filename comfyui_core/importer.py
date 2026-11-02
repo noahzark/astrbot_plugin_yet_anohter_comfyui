@@ -12,8 +12,7 @@ from typing import Any
 # Keys the new schema dropped on purpose (they did nothing, or are implied).
 DROPPED = {
     "comfyui_ai_prompt", "comfyui_translate", "trans_api", "comfyui_qr_mode", "comfyui_random_params",
-    "comfyui_random_params_enable", "comfyui_tips", "comfyui_limit_as_seconds", "comfyui_multi_backend",
-    "comfyui_random_wf", "comfyui_random_wf_list",
+    "comfyui_random_params_enable", "comfyui_tips", "comfyui_limit_as_seconds",
 }
 
 DEFAULT_KEYS = (
@@ -78,7 +77,7 @@ def import_nonebot_config(data: dict[str, Any], yaml_path: Path | None = None) -
         res.put("backend", "urls", [str(u) for u in take("comfyui_url_list")])
     elif has("comfyui_url"):
         res.put("backend", "urls", [str(take("comfyui_url"))])
-    seen.update({"comfyui_url", "comfyui_url_list"})
+    seen.update({"comfyui_url", "comfyui_url_list", "comfyui_multi_backend"})
     for src, dst in (("comfyui_timeout", "timeout"), ("comfyui_http_proxy", "http_proxy"), ("comfyui_model", "model")):
         if has(src):
             res.put("backend", dst, take(src))
@@ -92,6 +91,10 @@ def import_nonebot_config(data: dict[str, Any], yaml_path: Path | None = None) -
         res.put("workflow", "trigger_words", [str(w) for w in take("comfyui_trigger_word") or [] if w])
     if has("comfyui_auto_lora"):
         res.put("workflow", "auto_lora", bool(take("comfyui_auto_lora")))
+    if data.get("comfyui_random_wf"):
+        names = [str(w) for w in data.get("comfyui_random_wf_list") or ["txt2img"] if w]
+        res.put("workflow", "random_workflows", names)
+    seen.update({"comfyui_random_wf", "comfyui_random_wf_list"})
 
     # generation
     if has("comfyui_base_res"):
