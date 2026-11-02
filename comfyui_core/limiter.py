@@ -40,6 +40,21 @@ class RateLimiter:
     def update_cd(self, user_id: str) -> None:
         self.cd_records[user_id] = time.time()
 
+    def claim_cd(self, user_id: str) -> float | None:
+        """Start the cooldown now, before any await, so requests sent together
+        can't all pass :meth:`check_cd`. Returns the previous start for
+        :meth:`release_cd`."""
+        previous = self.cd_records.get(user_id)
+        self.update_cd(user_id)
+        return previous
+
+    def release_cd(self, user_id: str, previous: float | None) -> None:
+        """Undo :meth:`claim_cd` for a request that was turned away."""
+        if previous is None:
+            self.cd_records.pop(user_id, None)
+        else:
+            self.cd_records[user_id] = previous
+
     def check_daily_limit(
         self,
         daily_key: str,

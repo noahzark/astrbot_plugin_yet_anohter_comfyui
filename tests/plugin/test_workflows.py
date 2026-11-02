@@ -2,6 +2,7 @@
 import importlib
 import io
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -136,4 +137,19 @@ async def test_comfy_reload_registers_new_workflows(server, plugin_factory):
     out = [r async for r in plugin.comfy_reload(RecordingEvent("comfy reload", admin=True))]
     assert "mine" in out[0].chain[0].text
     assert plugin_commands.COMMANDS.workflow_for("我的画") == "mine"
+    await plugin.terminate()
+
+
+async def test_image_override_actions_receive_input_images(server, plugin_factory, png_file):
+    plugin = await plugin_factory(server)
+    wf_dir = Path(plugin.settings.workflows_dir)
+    shutil.copy(wf_dir / "img2img.json", wf_dir / "multi.json")
+    reflex = {"sampler": 3, "output": 9, "prompt": 6, "negative_prompt": 7,
+              "image": {"10": {"override": {"image": "image_0"}}}}  # no load_image, as in node_control.md
+    (wf_dir / "multi_reflex.json").write_text(json.dumps(reflex), encoding="utf-8")
+
+    await drive(plugin, with_images(RecordingEvent("prompt cat -wf multi"), Image.fromFileSystem(str(png_file))))
+    assert len(server.uploads) == 1
+    load = next(n for n in sent_prompt(server).values() if n["class_type"] == "LoadImage")
+    assert load["inputs"]["image"] == server.uploads[0]
     await plugin.terminate()

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +132,32 @@ def validate_permissions(reflex_json: dict[str, Any], group_id: str, is_admin: b
                 raise WorkflowGroupLimitation("此工作流不允许在当前群使用")
         except ValueError:
             pass
+
+
+_IMAGE_ACTION = re.compile(r"image_(\d+)")
+
+
+def image_override_indices(reflex_json: dict[str, Any]) -> set[int]:
+    """Input image indices used by ``image_N`` override actions, e.g.
+    ``{"image": {"50": {"override": {"image": "image_0"}}}}``."""
+    found: set[int] = set()
+    for key, value in reflex_json.items():
+        if key in ("reg_args", "output") or not isinstance(value, dict):
+            continue
+        for node in value.values():
+            override = node.get("override") if isinstance(node, dict) else None
+            if not isinstance(override, dict):
+                continue
+            for action in override.values():
+                match = _IMAGE_ACTION.fullmatch(action) if isinstance(action, str) else None
+                if match:
+                    found.add(int(match.group(1)))
+    return found
+
+
+def wants_images(reflex_json: dict[str, Any]) -> bool:
+    """Whether the workflow takes input images: ``load_image`` or an ``image_N`` override."""
+    return bool(reflex_json.get("load_image")) or bool(image_override_indices(reflex_json))
 
 
 def apply_reflex(

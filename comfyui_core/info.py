@@ -14,7 +14,7 @@ from typing import Any
 from .cli import build_parser
 from .client import ComfyClient
 from .settings import CoreSettings
-from .workflow import WorkflowStore
+from .workflow import WorkflowStore, image_override_indices, wants_images
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,16 @@ def _reg_args_rows(reg_args: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _image_count(reflex: dict[str, Any]) -> int:
+    load_image = reflex.get("load_image")
+    if isinstance(load_image, dict):
+        return len(load_image)
+    if load_image:
+        return 1
+    indices = image_override_indices(reflex)
+    return max(indices) + 1 if indices else 0
+
+
 def workflow_rows(store: WorkflowStore, search: str | None = None) -> list[dict[str, Any]]:
     """One row per listed workflow; ``search`` is a 1-based index or a substring.
 
@@ -162,7 +172,6 @@ def workflow_rows(store: WorkflowStore, search: str | None = None) -> list[dict[
             continue
         if reflex.get("visible") is False:
             continue
-        load_image = reflex.get("load_image")
         command = reflex.get("command") or ""
         override = reflex.get("override") if isinstance(reflex.get("override"), dict) else {}
         available = reflex.get("available") or []
@@ -172,8 +181,8 @@ def workflow_rows(store: WorkflowStore, search: str | None = None) -> list[dict[
             "command": " / ".join(command) if isinstance(command, list) else str(command),
             "note": str(reflex.get("note") or "").strip(),
             "day_limit": reflex.get("daylimit") or "不限",
-            "needs_image": bool(load_image),
-            "image_count": len(load_image) if isinstance(load_image, dict) else (1 if load_image else 0),
+            "needs_image": wants_images(reflex),
+            "image_count": _image_count(reflex),
             "media": reflex.get("media") or (", ".join(reflex["output"]) if isinstance(reflex.get("output"), dict) else "image"),
             "override": [f"{k}: {v}" for k, v in override.items()],
             "available": ", ".join(str(b) for b in available) + " 号后端" if available else "全部后端",

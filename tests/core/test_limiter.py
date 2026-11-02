@@ -59,3 +59,16 @@ def test_snapshot_round_trip_keeps_only_today():
     assert fresh.get_workflow_daily_usage(key, "wf") == 1
     fresh.restore(None)  # malformed stored data is ignored
     assert fresh.check_daily_limit(key, 8)[1] is True
+
+
+def test_claimed_cooldown_can_be_given_back():
+    rl = RateLimiter(cd_seconds=20, day_limit=50)
+    previous = rl.claim_cd("u1")
+    assert previous is None and rl.check_cd("u1")[0]
+    rl.release_cd("u1", previous)
+    assert rl.check_cd("u1") == (False, 0)
+
+    rl.update_cd("u1")
+    started = rl.cd_records["u1"]
+    rl.release_cd("u1", rl.claim_cd("u1"))
+    assert rl.cd_records["u1"] == started

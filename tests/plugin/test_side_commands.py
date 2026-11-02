@@ -285,3 +285,20 @@ async def test_import_config_round_trips_the_nonebot_template(server, plugin_fac
 
     missing = text_of(await run(plugin.comfy_import_config, RecordingEvent("comfy import-config /nope.yaml", admin=True)))
     assert "读取" in missing and "失败" in missing
+
+
+async def test_usage_guide_rendered_locally_is_sent_as_a_file(plugin, monkeypatch, tmp_path):
+    guide = tmp_path / "guide.png"
+    guide.write_bytes(PNG_1X1)
+
+    async def html_render(tmpl, data):
+        return "https://render.example/card.jpg"
+
+    async def text_to_image(text):  # AstrBot's local fallback returns a path, not a URL
+        return str(guide)
+
+    plugin.cards = True
+    monkeypatch.setattr(plugin, "html_render", html_render, raising=False)
+    monkeypatch.setattr(plugin, "text_to_image", text_to_image, raising=False)
+    files = [i.file for i in images(await run(plugin.help, RecordingEvent("comfyui帮助")))]
+    assert files[0] == "https://render.example/card.jpg" and files[1].endswith("guide.png")

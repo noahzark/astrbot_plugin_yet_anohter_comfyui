@@ -1,7 +1,7 @@
 import pytest
 
 from comfyui_core.client import ComfyClient
-from comfyui_core.exceptions import APIJsonError, NoAvailableBackendError
+from comfyui_core.exceptions import APIJsonError, ComfyuiBackendConnectionError, NoAvailableBackendError
 
 from fake_comfy import FakeComfy
 
@@ -77,3 +77,19 @@ async def test_close_is_idempotent(client):
     await client.get_session()
     await client.close()
     await client.close()
+
+
+async def test_retire_keeps_the_session_for_running_jobs(client):
+    async with client.job():
+        session = await client.get_session()
+        await client.retire()
+        assert not session.closed and await client.get_session() is session
+    assert session.closed
+    with pytest.raises(ComfyuiBackendConnectionError):
+        await client.get_session()  # a retired client opens no new session
+
+
+async def test_retire_when_idle_closes_at_once(client):
+    session = await client.get_session()
+    await client.retire()
+    assert session.closed

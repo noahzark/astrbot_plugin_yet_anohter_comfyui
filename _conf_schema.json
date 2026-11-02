@@ -59,6 +59,12 @@
         "type": "bool",
         "default": false,
         "hint": "开启后，提示词里 <lora:名称:权重> 的名称会和后端已有的 LoRA 文件名模糊匹配。"
+      },
+      "random_workflows": {
+        "description": "随机工作流",
+        "type": "list",
+        "default": [],
+        "hint": "填写工作流名称后，prompt、额外触发词、二次元的我、llm-tag 和 LLM 画图在没有指定工作流（-wf）时，会从这里随机选一个。留空则使用默认工作流。"
       }
     }
   },
@@ -132,7 +138,7 @@
         "description": "超级用户",
         "type": "list",
         "default": [],
-        "hint": "不受冷却、每日上限和参数上限约束的用户 ID。AstrBot 管理员自动视为超级用户。"
+        "hint": "视为插件管理员的用户 ID：不受冷却、每日上限和参数上限约束，可以使用仅限管理员的工作流、-be 后端地址和管理命令。AstrBot 管理员自动视为超级用户。"
       }
     }
   },
@@ -185,7 +191,8 @@
       "enabled": {
         "description": "启用图片审核",
         "type": "bool",
-        "default": true
+        "default": false,
+        "hint": "默认关闭。开启前先选好审核方式：remote 会把每张生成的图片发到下面的远程审核地址，默认地址是第三方服务器，建议换成自己的 tagger 或改用本地审核。"
       },
       "level": {
         "description": "审核等级",
